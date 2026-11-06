@@ -49,7 +49,8 @@
       var step = Math.max(4, Math.floor((pair[1] - pair[0]) / budget));
       for (var k = step; k < leg.length - Math.max(2, Math.floor(step / 2)); k += step) {
         if (arrowsDrawn >= 45) break;
-        var deg = Math.round(heading(leg[k - 1], leg[k]));
+        // ➤ points east at 0°; the bearing is measured from north: remove the 90° offset.
+        var deg = Math.round(heading(leg[k - 1], leg[k]) - 90);
         L.marker(leg[k], {
           interactive: false,
           keyboard: false,
