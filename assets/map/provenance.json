@@ -1,13 +1,13 @@
 {
-  "solverforge_ui_commit": "504c2ce1c08a986005946cb7936a4cff87302613",
+  "solverforge_ui_commit": "c0381e7489131f7a42b40533ca32efd3221ad733",
   "solverforge_ui_repository": "https://github.com/solverforge/solverforge-ui",
   "leaflet_version": "1.9.4",
   "leaflet_license_source": "https://raw.githubusercontent.com/Leaflet/Leaflet/v1.9.4/LICENSE",
   "sha256": {
     "leaflet.js": "db49d009c841f5ca34a888c96511ae936fd9f5533e90d8b2c4d57596f4e5641a",
     "leaflet.css": "a7837102824184820dfa198d1ebcd109ff6d0ff9a2672a074b9a1b4d147d04c6",
-    "sf-map.js": "26d814be65e2e488104f5dfada87a175275b28da21c2d206172ee48ff51f89a2",
-    "sf-map.css": "bb21875455b7f5522a3da68df830b8e042610059cc58687330e88096f9c0bcf7",
+    "sf-map.js": "416bb4ce8c79687d17848f4591606ccf99e4d991156ddb699e97dd570618331b",
+    "sf-map.css": "dd2e78df9704b01ae0092d864df128bb78b45074331d37d4aaccb992dbd8e215",
     "solverforge-ui-LICENSE": "5416115b91952412c8f4c40230090acd00fd36b2c8a50df50b07b1ac1d314b4e",
     "Leaflet-LICENSE": "53e8dc25862014e4324741ca18fbe3611e11d42ef69f59f86ea8c5389647d4cb"
   }

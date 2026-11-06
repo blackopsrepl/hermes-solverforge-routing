@@ -25,11 +25,22 @@
     marker.getElement().setAttribute('aria-label', text.textContent);
     marker.getElement().setAttribute('title', text.textContent);
   });
-  // One line per travel hop, exactly as the engine routed it on the road graph.
-  var LEG_COLORS = ['#1d4f9c', '#2e7cc4', '#63a4dd', '#9ec5e8'];
-  (data.legs || []).forEach(function (leg, n) {
-    ctrl.drawRoute({ points: leg.map(function (p) { return [p[1], p[0]]; }), color: LEG_COLORS[n % LEG_COLORS.length], weight: 5, opacity: 1 });
-  });
+  // One composite scene, exactly as the engine routed it on the road graph:
+  // ordered travel hops in, casing/body/arrow paint handled by SF.map.
+  // Nothing is solved until the pane shows a plan; an empty state draws none.
+  if ((data.legs || []).length) {
+    var LEG_COLORS = ['#1d4f9c', '#2e7cc4', '#63a4dd', '#9ec5e8'];
+    ctrl.drawRouteLegs({
+      legs: data.legs.map(function (leg, n) {
+        return {
+          points: leg.map(function (p) { return [p[1], p[0]]; }),
+          color: LEG_COLORS[n % LEG_COLORS.length],
+        };
+      }),
+      weight: 14,
+      directionPaint: { enabled: true, spacing: 60, length: 12 },
+    });
+  }
   var zooming = false;
   var fitPending = false;
   var fit = function () {
