@@ -28,52 +28,29 @@
   // Travel direction: the road carries its own lane paint, SimCity-style. One colour
   // per hop on a white casing, with chevrons stroked INTO the overlay so they sit
   // centred on the road and scale and pan with it like painted lane arrows.
+  // The route is REAL road geometry. The lane paint (casing, colour, chevrons) is
+  // screen-sized and repainted at every zoom, exactly like painted roads in a game:
+  // it never drifts off the road regardless of the viewport scale.
   var LEG_COLORS = ["#1d4f9c", "#2e7cc4", "#63a4dd", "#9ec5e8"];
-  var LANE = 2.5;   // how far the painted lane sits right of the true line
-  var toLatLng = function (p) { return [p[0], p[1]]; };
-  // Right-hand traffic: every hop is drawn in its own right lane, so a round trip
-  // that reuses a stretch reads as a two-way street the whole way.
-  function laneLatLngs(map, leg) {
-    var pts = leg.map(function (p) { return map.latLngToLayerPoint(p); });
-    var out = [], i;
-    var dir = function (a, b) {
-      var dx = b.x - a.x, dy = b.y - a.y, len = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-6);
-      return { x: dx / len, y: dy / len };
-    };
-    for (i = 0; i < pts.length; i++) {
-      var u = dir(pts[Math.max(0, i - 1)], pts[Math.min(pts.length - 1, i + 1)]);
-      var p = { x: pts[i].x - u.y * LANE, y: pts[i].y + u.x * LANE };
-      out.push(map.layerPointToLatLng(p));
-    }
-    return out;
-  }
-  function laneArrows(map, lane) {
-    // Direction chevrons: road markers carrying a small SVG arrow, centred on the
-    // lane, rotated by the screen-space bearing of the local road segment.
-    var count = 0;
-    var geoSpan = lane.length;
-    var budget = Math.min(12, Math.ceil(geoSpan / Math.max(8, Math.floor(geoSpan / 45))));
-    var step = Math.max(4, Math.floor(geoSpan / budget));
-    for (var k = step; k < lane.length - Math.max(2, Math.floor(step / 2)); k += step) {
-      if (count >= 45) break;
-      if (!lane[k - 1] || !lane[k]) break;
-      var a = map.latLngToContainerPoint(lane[k - 1]);
-      var b = map.latLngToContainerPoint(lane[k]);
-      var deg = Math.round(Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI);
-      L.marker(lane[k], {
-        interactive: false,
-        keyboard: false,
-        icon: L.divIcon({
-          className: 'route-arrow',
-          iconSize: [12, 12],
-          iconAnchor: [6, 6],
-          html: '<svg width="12" height="12" style="display:block"><path d="M1,3.2L11,6L1,8.8" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" opacity="0.95" style="transform:translate(0,0) rotate(' + deg + 'deg);transform-origin:6px 6px"></path></svg>'
-        })
-      }).addTo(map);
-      count++;
+  var LANE_PX = 5;        // right-hand offset of the painted lane, in screen pixels
+  var ARROW_PX = 16;      // chevron size, in screen pixels
+  var ARROW_STEP_PX = 110; // spacing between chevrons, in screen pixels
+  var lanePaint = [];      // layers added per render, removed at the next zoom
+  function clearLanePaint() {
+    while (lanePaint.length) {
+      var layer = lanePaint.pop();
+      if (layer.removeFrom) layer.removeFrom(map);
     }
   }
-  function drawLegs() {
+  function renderLanePaint() {
+    var toLatLng = function (p) { return [p[0], p[1]]; };
+    clearLanePaint();
+    if (!(data.solved && data.markers.length)) {
+      // No plan yet: a plain centred line, no lane paint, no arrows.
+      var geo0 = data.geometry.map(function (p) { return [p[1], p[0]]; });
+      if (geo0.length > 1) lanePaint.push(ctrl.drawRoute({ points: geo0, color: '#8fa8c0', weight: 4, opacity: 0.9 }));
+      return;
+    }
     var geo = data.geometry.map(function (p) { return [p[1], p[0]]; });
     var cut = function (id) { var m = /^geo:(\d+)_(\d+)$/.exec(id); return m ? [Number(m[1]), Number(m[2])] : null; };
     var legs = (data.legs || []).map(cut).filter(function (x) { return x && x[1] > x[0]; });
@@ -85,13 +62,46 @@
       if (leg.length < 2) return;
       var color = LEG_COLORS[li % LEG_COLORS.length];
       li++;
-      var lane = laneLatLngs(map, leg);
-      ctrl.drawRoute({ points: lane, color: '#ffffff', weight: 9, opacity: 0.9 });
-      ctrl.drawRoute({ points: lane, color: data.solved ? color : '#8fa8c0', weight: 5, opacity: data.solved ? 1 : 0.9 });
-      if (data.solved) laneArrows(map, lane);
+      // Offset in screen pixels around each sample point (right-hand side of travel).
+      var pts = leg.map(function (p) { return map.latLngToContainerPoint(p); });
+      var lane = pts.map(function (p, n) {
+        var a = pts[Math.max(0, n - 1)], b = pts[Math.min(pts.length - 1, n + 1)];
+        var dx = b.x - a.x, dy = b.y - a.y, len = Math.max(Math.sqrt(dx * dx + dy * dy), 1e-6);
+        var u = { x: dx / len, y: dy / len };
+        return map.containerPointToLatLng({ x: p.x - u.y * LANE_PX, y: p.y + u.x * LANE_PX });
+      });
+      lanePaint.push(ctrl.drawRoute({ points: lane, color: '#ffffff', weight: 9, opacity: 0.9 }));
+      lanePaint.push(ctrl.drawRoute({ points: lane, color: color, weight: 5, opacity: 1 }));
+      // Chevrons every ARROW_STEP_PX of screen distance along the painted lane.
+      var screen = pts;
+      var travelled = 0, nextAt = ARROW_STEP_PX, i = 1, prev = screen[0], placed = 0;
+      while (i < screen.length && placed < 60) {
+        var cur = screen[i];
+        var seg = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+        if (seg === 0) { i++; continue; }
+        if (travelled + seg < nextAt) { travelled += seg; prev = cur; i++; continue; }
+        var t = (nextAt - travelled) / seg;
+        var cx = prev.x + (cur.x - prev.x) * t, cy = prev.y + (cur.y - prev.y) * t;
+        var deg = Math.round(Math.atan2(cur.y - prev.y, cur.x - prev.x) * 180 / Math.PI);
+        var at = map.containerPointToLatLng({ x: cx, y: cy });
+        var arrow = L.marker(at, {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({
+            className: 'route-arrow',
+            iconSize: [ARROW_PX, ARROW_PX],
+            iconAnchor: [ARROW_PX / 2, ARROW_PX / 2],
+            html: '<svg width="' + ARROW_PX + '" height="' + ARROW_PX + '" style="display:block"><path d="M' + (ARROW_PX * 0.14) + ',' + (ARROW_PX * 0.26) + 'L' + (ARROW_PX * 0.88) + ',' + (ARROW_PX * 0.5) + 'L' + (ARROW_PX * 0.14) + ',' + (ARROW_PX * 0.74) + '" stroke="#fff" stroke-width="' + (ARROW_PX / 6) + '" fill="none" stroke-linecap="round" opacity="0.95" style="transform:rotate(' + deg + 'deg);transform-origin:' + (ARROW_PX / 2) + 'px ' + (ARROW_PX / 2) + 'px"></path></svg>'
+          })
+        }).addTo(map);
+        lanePaint.push(arrow);
+        placed++;
+        nextAt += ARROW_STEP_PX;
+        prev = { x: cx, y: cy };
+      }
     });
   }
-  if (data.geometry.length > 1) drawLegs();
+  if (data.geometry.length > 1) renderLanePaint();
   var zooming = false;
   var fitPending = false;
   var fit = function () {
@@ -105,6 +115,7 @@
   map.on('zoomend', function () {
     zooming = false;
     if (fitPending) { fitPending = false; fit(); }
+    renderLanePaint();
   });
   if (data.markers.length) {
     // Fit sits with the zoom buttons, as a map control, not in a toolbar.

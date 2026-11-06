@@ -148,14 +148,17 @@ try:
         leg_paths = frame.locator('.leaflet-overlay-pane path')
         # Each road lane: a white casing and the coloured line; directions are road
         # markers whose inline SVG chevron is centred on the lane.
-        assert leg_paths.count() == 2 * len(doclegs), (leg_paths.count(), len(doclegs))
+        assert leg_paths.count() == 2 * len(doclegs), (leg_paths.count(), len(doclegs), errors)
         arrows = frame.locator('.route-arrow')
         assert arrows.count() >= len(doclegs) - 1, (arrows.count(), doclegs)
         expect(frame.locator('.sf-marker-stop')).to_have_count(3)
         assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'map or attribution clipped'
-        expect(frame.locator('.leaflet-control-attribution')).to_contain_text('OpenStreetMap contributors')
+        assert 'OpenStreetMap contributors' in frame.locator('.leaflet-control-attribution').inner_text(), errors
         assert page.locator('iframe').get_attribute('sandbox') == 'allow-scripts'
-        expect(frame.locator('.leaflet-tile-loaded').first).to_be_visible(timeout=30000)
+        try:
+            expect(frame.locator('.leaflet-tile-loaded').first).to_be_visible(timeout=30000)
+        except Exception:
+            raise AssertionError(errors)
         assert frame.locator('.leaflet-tile-loaded').evaluate_all('(tiles) => tiles.every(t => t.complete && t.naturalWidth === 256)'), 'not actual loaded raster tiles'
         def map_fits():
             fits = """el => {
@@ -449,6 +452,9 @@ try:
         assert abs(out_x[0] - back_x[0]) > 3, (out_x, back_x)  # the lanes really sit side by side
         arrows = frame.locator('.route-arrow')
         assert arrows.count() >= 4, arrows.count()  # both directions get their paint
+        frame.get_by_role('button', name='Zoom in', exact=True).click()
+        page.wait_for_timeout(1500)   # zoomend repaints the lane paint
+        shot('two-way-zoomed.png')
         # The two lanes carry opposite headings: collect every chevron's rotation.
         angles = frame.locator('.route-arrow svg path').evaluate_all(
             "(paths) => paths.map(p => { const m = /rotate\\(([-0-9.]+)deg\\)/.exec(p.getAttribute('style')); return m ? Number(m[1]) : null })")
