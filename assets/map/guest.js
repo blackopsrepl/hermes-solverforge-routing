@@ -16,9 +16,11 @@
   });
   groups.forEach(function (stops) {
     var first = stops[0];
-    var marker = ctrl.addStopNumber({lat: first.coordinates[1], lng: first.coordinates[0], number: stops.map(function (p) { return p.number; }).join('/'), color: '#144e87'});
+    // The start reads S, as in the itinerary; unplanned stops carry no number yet.
+    var badge = function (p) { return p.number === 0 ? 'S' : data.solved ? String(p.number) : '•'; };
+    var marker = ctrl.addStopNumber({lat: first.coordinates[1], lng: first.coordinates[0], number: stops.map(badge).join('/'), color: '#144e87'});
     var text = document.createElement('span');
-    text.textContent = stops.map(function (p) { return p.number + ': ' + p.title; }).join(' · ');
+    text.textContent = stops.map(function (p) { return (data.solved || p.number === 0 ? badge(p) + ': ' : '') + p.title; }).join(' · ');
     marker.bindPopup(text);
     marker.getElement().setAttribute('aria-label', text.textContent);
     marker.getElement().setAttribute('title', text.textContent);
@@ -38,8 +40,19 @@
     zooming = false;
     if (fitPending) { fitPending = false; fit(); }
   });
-  document.getElementById('fit').addEventListener('click', fit);
-  document.getElementById('summary').textContent = '';
+  if (data.markers.length) {
+    // Fit sits with the zoom buttons, as a map control, not in a toolbar.
+    var FitControl = L.Control.extend({options: {position: 'topleft'}, onAdd: function () {
+      var button = L.DomUtil.create('button', 'fit-control');
+      button.type = 'button';
+      button.textContent = 'Fit';
+      button.title = 'Show the whole route';
+      L.DomEvent.disableClickPropagation(button);
+      L.DomEvent.on(button, 'click', fit);
+      return button;
+    }});
+    map.addControl(new FitControl());
+  }
   var failed = false;
   setTimeout(function () {
     if (!failed && !document.querySelector('.leaflet-tile-loaded')) {

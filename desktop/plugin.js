@@ -1,5 +1,5 @@
-import { Button, SandboxedFrame, host, useValue, useQuery, useMutation, useQueryClient, ROUTES_AREA, SIDEBAR_NAV_AREA, TRANSCRIPT_DIRECTIVE_AREA } from '@hermes/plugin-sdk'
-import { useState } from 'react'
+import { Button, SandboxedFrame, host, useValue, useQuery, useMutation, useQueryClient, PALETTE_AREA, STATUSBAR_AREAS, TRANSCRIPT_DIRECTIVE_AREA } from '@hermes/plugin-sdk'
+import { useEffect, useRef, useState } from 'react'
 import { jsx, jsxs } from 'react/jsx-runtime'
 
 const ID = 'solverforge-routing'
@@ -7,10 +7,9 @@ let rest
 const muted = { color:'var(--ui-text-secondary)', fontSize:13, lineHeight:1.5 }
 const panel = { border:'1px solid var(--ui-stroke-secondary)', borderRadius:12, padding:18, background:'var(--ui-bg-elevated, transparent)' }
 const row = { display:'flex', alignItems:'center', flexWrap:'wrap', gap:8 }
-const field = { padding:'9px 12px', borderRadius:7, border:'1px solid var(--ui-stroke-secondary)', background:'var(--ui-bg-primary, transparent)', color:'var(--ui-text-primary)', minWidth:180, flex:1 }
 const paragraph = text => jsx('p', { style:{...muted,margin:'6px 0'}, children: text })
 // Geocoder titles are full postal strings; people read the place name first.
-const splitName = text => { const parts = String(text || '').split(',').map(s => s.trim()).filter(Boolean); const n = parts.length > 1 && /^\d+[a-z]?$/i.test(parts[0]) ? 2 : 1; return [parts.slice(0, n).reverse().join(' '), parts.slice(n, n + 2).join(', ')] }
+const splitName = text => { const parts = String(text || '').split(',').map(s => s.trim()).filter(Boolean).filter(p => !/^[0-9_]+$/.test(p)); const n = parts.length > 1 && /^\d+[a-z]?$/i.test(parts[0]) ? 2 : 1; return [parts.slice(0, n).reverse().join(' '), parts.slice(n, n + 2).join(', ')] }
 const short = text => splitName(text)[0]
 const label = place => place ? (place.title ? short(place.title) : place.coordinates.join(', ')) : 'Not set'
 const NameLines = ({text, strong=true}) => { const [name, rest] = splitName(text); return jsxs('div',{children:[jsx(strong?'strong':'span',{children:name}), rest ? jsx('div',{style:{...muted,fontSize:12},children:rest}) : null]}) }
@@ -34,18 +33,18 @@ function QrCode({qr, caption}) {
     jsxs('svg',{role:'img','aria-label':caption,viewBox:`0 0 ${qr.size} ${qr.size}`,width:176,height:176,shapeRendering:'crispEdges',style:{background:'#fff',borderRadius:6},children:[jsx('rect',{width:qr.size,height:qr.size,fill:'#ffffff'}),jsx('path',{d:qr.path,fill:'#000000'})]}),
     jsx('figcaption',{style:{...muted,fontSize:12,textAlign:'center'},children:caption})]})
 }
-function Handoff({nav}) {
+function Handoff({nav, showQr, onToggleQr}) {
   if (!nav) return null
   const points = nav.points
-  const group = (name, legs) => legs.length === 1 ? [jsx(ExternalLink,{url:legs[0].url,text:`Open in ${name}`},name)] : legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:`${name} · leg ${i+1}/${legs.length} (${legName(leg,points)})`},`${name}${i}`))
+  const group = (name, legs) => legs.length === 1 ? [jsx(ExternalLink,{url:legs[0].url,text:name},name)] : legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:`${name} ${i+1}/${legs.length}`},`${name}${i}`))
   const mobile = nav.google_mobile.legs
-  return jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:10},children:[
-    jsx('h3',{style:{margin:0},children:'Navigate'}),
+  return jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8,borderTop:'1px solid var(--ui-stroke-tertiary)',paddingTop:12},children:[
+    jsx('h3',{style:{margin:0,fontSize:14},children:'Navigate'}),
     jsxs('div',{style:row,children:[...group('Google Maps',nav.google.legs),...group('Apple Maps',nav.apple.legs)]}),
-    jsxs('details',{children:[jsx('summary',{style:{cursor:'pointer'},children:'OpenStreetMap'}),
+    jsxs('details',{style:muted,children:[jsx('summary',{style:{cursor:'pointer'},children:'OpenStreetMap'}),
       jsx('div',{style:{...row,marginTop:8},children:nav.osm.legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:legName(leg,points)},`osm${i}`))})]}),
-    paragraph('Scan to open on your phone'),
-    jsx('div',{style:{...row,alignItems:'flex-start',gap:16},children:mobile.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:mobile.length>1?`Leg ${i+1}/${mobile.length}: ${legName(leg,points)}`:'Whole route'},`qr${i}`))}),
+    jsx(Button,{onClick:onToggleQr,variant:'text',size:'sm',children:showQr?'Hide QR code':'Send to phone (QR code)'}),
+    showQr ? jsx('div',{style:{...row,alignItems:'flex-start',gap:16},children:mobile.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:mobile.length>1?`Part ${i+1}/${mobile.length}: ${legName(leg,points)}`:'Scan with your phone'},`qr${i}`))}) : null
   ]})
 }
 const km = metres => `${(metres/1000).toFixed(1)} km`
@@ -82,135 +81,111 @@ function PendingPlan({plan, state, onApply, busy}) {
     jsx(Button,{onClick:apply,disabled:stale||busy||unresolved.length>0||!using.length,children:`Add ${using.length} place${using.length===1?'':'s'}`})
   ]})
 }
-function RoutingSurface({ editable = false, scope }) {
+// The route is edited in chat. This view shows it: the map first, then the itinerary.
+function RoutingSurface({ compact = false, scope }) {
   const client = useQueryClient()
   const key = [ID, ...scope]
-  const query = useQuery({ queryKey: key, queryFn: () => rest('/current'), refetchInterval: 15000 })
+  // Short poll: edits arrive from the chat, and the map should follow them promptly.
+  const query = useQuery({ queryKey: key, queryFn: () => rest('/current'), refetchInterval: 4000 })
   const [message, setMessage] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [region, setRegion] = useState('')
-  const [results, setResults] = useState(null)
-  const [searching, setSearching] = useState(false)
-  const [title, setTitle] = useState('')
-  const [coordinates, setCoordinates] = useState('')
-  const [pending, setPending] = useState(null)
-  const [before, setBefore] = useState('')
-  const [after, setAfter] = useState('')
+  const [showQr, setShowQr] = useState(false)
   const mutation = useMutation({ mutationFn: ({action, args}) => {
     if (host.state.connectionId.get() !== scope[0] || host.state.profile.get() !== scope[1]) throw new Error('Profile changed. Refresh.')
     return rest(`/actions/${action}`, { method: 'POST', body: args })
-  }, onSuccess: result => { setMessage(result.ok ? 'Route updated.' : result.error?.message || 'Edit refused.'); setPending(null); client.invalidateQueries({queryKey:key}) }, onError: error => { setMessage(/expected revision|route changed|plan was made/i.test(error.message || '') ? 'The route changed. Refreshed.' : error.message || 'Something went wrong. Refresh.'); setPending(null); client.invalidateQueries({queryKey:key}) } })
+  }, onSuccess: result => { setMessage(result.ok ? '' : result.error?.message || 'Not applied.'); client.invalidateQueries({queryKey:key}) }, onError: error => { setMessage(/expected revision|route changed|plan was made/i.test(error.message || '') ? 'The route changed. Refreshed.' : error.message || 'Something went wrong.'); client.invalidateQueries({queryKey:key}) } })
   if (query.isPending) return paragraph('Loading route…')
   if (query.error || !query.data?.ok) return paragraph(query.data?.error?.message || 'Could not load the route.')
   const data = query.data, state = data.state, solution = state.solution
   const fresh = solution && data.solved_revision === state.revision
   const byId = new Map(state.stops.map(s => [s.id,s]))
   const order = fresh ? solution.remaining_order : state.stops.filter(s => !s.visited).map(s => s.id)
-  // Buttons are the deliberate step: they edit directly. Only removing a stop asks again.
   const run = (name,args={}) => mutation.mutate({action:name,args:{...args,expected_revision:state.revision}})
-  const action = (name,args={}) => name === 'remove_stop' ? setPending({action:name,args:{...args,expected_revision:state.revision}}) : run(name,args)
-  const button = (text, click, disabled=false, variant='secondary') => jsx(Button,{onClick:click,disabled:disabled || mutation.isPending,variant,size:'sm',children:text},text)
-  const primary = (text, click, disabled=false) => button(text, click, disabled, 'default')
-  const search = async () => {
-    if (host.state.connectionId.get() !== scope[0] || host.state.profile.get() !== scope[1]) return
-    setSearching(true); setResults(null)
-    try {
-      const result = await rest('/actions/search_locations', {method:'POST',body:{query:searchQuery,region}})
-      if (result.ok) setResults(result)
-      else setMessage(result.error?.message || 'Search failed.')
-    } catch (error) { setMessage(error.message || 'Search unavailable.') }
-    finally { setSearching(false) }
-  }
-  const usePlace = (candidate, role) => { action('confirm_location',{candidate_id:candidate.candidate_id,role}); setResults(null); setSearchQuery('') }
-  const useCoordinates = (name, field) => {
-    const parts = coordinates.split(',').map(s=>s.trim())
-    if (parts.length!==2 || parts.some(s=>!s || !Number.isFinite(Number(s)))) { setMessage('Enter longitude, latitude.'); return }
-    action(name,{[field]:{title,coordinates:parts.map(Number)}}); setTitle(''); setCoordinates('')
-  }
-  const home = state.return_origin || state.return_location || state.home || state.start_origin
   const hasStart = Boolean(state.origin)
-  const open = state.stops.filter(s => !s.visited)
-  const canPlan = hasStart && open.length > 0 && data.engine.available
-  const removing = pending?.action === 'remove_stop' ? byId.get(pending.args.stop_id) : null
-  const resultActions = candidate => hasStart
-    ? [primary('Add stop',()=>usePlace(candidate,'stop')), button('End here',()=>usePlace(candidate,'endpoint'),false,'text')]
-    : [primary('Start here',()=>usePlace(candidate,'origin'))]
-  const stopRow = (id, index) => {
-    const stop = byId.get(id); if (!stop) return null
-    const isNext = state.next_id === id
-    return jsxs('li',{style:{...row,padding:'12px 0',borderTop:'1px solid var(--ui-stroke-tertiary)'},children:[
-      jsx('span',{style:{display:'grid',placeItems:'center',width:30,height:30,borderRadius:'50%',background:fresh?'var(--ui-accent)':'var(--ui-bg-quaternary)',color:fresh?'var(--ui-bg-primary, white)':'var(--ui-text-primary)',fontWeight:700},children:fresh?index+1:'•'}),
-      jsxs('div',{style:{flex:1,minWidth:160},children:[jsx(NameLines,{text:stop.title || stop.coordinates.join(', ')}),isNext?jsx('div',{style:{...muted,color:'var(--ui-accent)',fontWeight:600},children:'Going here next'}):null]}),
-      editable?jsxs('span',{style:row,children:[
-        isNext ? button('Don’t go next',()=>action('set_next',{stop_id:null}),false,'text') : button('Go here next',()=>action('set_next',{stop_id:id}),false,'text'),
-        button('Visited',()=>action('mark_visited',{stop_id:id})),
-        button('Remove',()=>action('remove_stop',{stop_id:id}),false,'outline')]}):null]},id)
-  }
-  const nameOf = id => short(byId.get(id)?.title) || 'Stop'
-  return jsxs('section',{'data-revision':state.revision,style:{padding:24,maxWidth:1120,margin:'0 auto',display:'flex',flexDirection:'column',gap:14,color:'var(--ui-text-primary)',fontFamily:'inherit'},children:[
-    jsxs('header',{style:{...row,justifyContent:'space-between'},children:[jsx('h2',{style:{margin:0,fontSize:25,letterSpacing:'-.5px'},children:'Your driving route'}),button('Refresh',()=>query.refetch(),false,'ghost')]}),
-    jsxs('div',{style:{...panel,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:18,alignItems:'start'},children:[
-      jsxs('div',{children:[jsx('strong',{children:'Start'}),paragraph(hasStart?label(state.origin):'Not set yet')]}),
-      jsxs('div',{children:[jsx('strong',{children:'End'}),paragraph(state.round_trip?`Back to start`:state.endpoint?label(state.endpoint):'At the last stop')]}),
-      jsxs('div',{children:[jsx('strong',{children:'Driving'}),
-        fresh ? jsxs('div',{children:[paragraph(`${Math.ceil(solution.road_duration_seconds/60)} min · ${(solution.distance_m/1000).toFixed(1)} km · ${order.length} stop${order.length===1?'':'s'} to go`),solution.comparison?.message?jsx('p',{style:{margin:'6px 0',fontWeight:700,color:'var(--ui-accent)'},children:solution.comparison.message}):null]})
-          : canPlan ? jsxs('div',{style:{...row,marginTop:6},children:[primary('Plan route',()=>run('solve',{solve_seconds:2}))]})
-          : paragraph(!hasStart ? 'Add a start and a stop' : !open.length ? 'Add a stop' : 'Routing engine not installed')]})
-    ]}),
-    data.pending_plan ? jsx(PendingPlan,{plan:data.pending_plan,state,busy:mutation.isPending,onApply:(args)=>run('confirm_plan',args)},data.pending_plan.plan_id) : null,
-    fresh && solution.repair ? jsxs('div',{style:panel,children:[jsx('strong',{children:'Changes'}),paragraph(solution.repair.summary),
-      jsx('ul',{style:{...muted,margin:'4px 0',paddingLeft:20},children:[...solution.repair.added.map(s=>jsx('li',{children:`Added ${short(s.title)} as stop ${s.position}`},'a'+s.id)),...solution.repair.removed.map(s=>jsx('li',{children:`Removed ${short(s.title)}`},'r'+s.id)),...solution.repair.visited.map(s=>jsx('li',{children:`Visited ${short(s.title)}`},'v'+s.id)),...solution.repair.moved.map(s=>jsx('li',{children:`${short(s.title)}: stop ${s.previous_position} → ${s.position}`},'m'+s.id))]})]}) : null,
-    data.map_document ? jsx(SandboxedFrame,{src:'data:text/html;charset=utf-8,'+encodeURIComponent(data.map_document),sandbox:'allow-scripts',title:'Route map',style:{width:'100%',height:'clamp(320px, 38vw, 460px)',border:'1px solid var(--ui-stroke-secondary)',borderRadius:12,flexShrink:0}}) : null,
-    jsxs('div',{style:panel,children:[
-      jsx('h3',{style:{margin:'0 0 4px'},children:fresh?'Itinerary':'Stops'}),
-      order.length ? jsx('ol',{style:{listStyle:'none',padding:0,margin:0},children:order.map(stopRow)}) : paragraph(hasStart ? 'No stops yet.' : 'Search for where you start, then add the places you want to visit.'),
-      fresh && state.round_trip ? paragraph(`Then back to start`) : fresh && state.endpoint ? paragraph(`Then end at ${label(state.endpoint)}`) : null,
-      state.visited.length ? jsxs('details',{style:{marginTop:12},children:[jsx('summary',{style:{cursor:'pointer'},children:`Visited · ${state.visited.length}`}),jsx('ul',{children:state.visited.map(id=>jsx('li',{children:label(byId.get(id))},id))})]}):null,
-      removing ? jsxs('div',{role:'alert',style:{...row,marginTop:12,padding:12,borderRadius:8,border:'1px solid var(--ui-accent)'},children:[jsx('span',{style:{flex:1},children:`Remove ${short(removing.title) || 'this stop'}?`}),primary('Remove',()=>mutation.mutate(pending)),button('Keep',()=>setPending(null),false,'text')]}) : null
-    ]}),
-    fresh ? jsx(Handoff,{nav:data.navigation}) : null,
-    editable ? jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:12},children:[
-      jsx('h3',{style:{margin:0},children:hasStart?'Add a stop':'Where do you start?'}),
-      jsxs('form',{style:row,onSubmit:e=>{e.preventDefault(); if(searchQuery.trim() && !searching) search()},children:[
-        jsx('input',{style:{...field,flex:2},value:searchQuery,disabled:searching,maxLength:300,onChange:e=>{setSearchQuery(e.target.value);setResults(null)},'aria-label':'Place or address',placeholder:'Place or street address'}),
-        jsx('input',{style:field,value:region,disabled:searching,maxLength:200,onChange:e=>{setRegion(e.target.value);setResults(null)},'aria-label':'City or region',placeholder:'City or region'}),
-        jsx(Button,{type:'submit',disabled:searching || !searchQuery.trim(),size:'sm',children:searching?'Searching…':'Search'})]}),
-      results ? (results.candidates.length ? jsx('ul',{style:{listStyle:'none',padding:0,margin:0},children:results.candidates.map(candidate=>jsxs('li',{style:{...row,padding:'10px 0',borderTop:'1px solid var(--ui-stroke-tertiary)'},children:[
-          jsx('div',{style:{flex:1,minWidth:200,overflowWrap:'anywhere'},children:jsx(CandidateText,{c:candidate})}),
-          jsx('span',{style:row,children:resultActions(candidate)})]},candidate.candidate_id))}) : paragraph('No matches.')) : null,
-      results && results.expected_kind && results.candidates.length && !results.candidates.some(c=>c.matches_query_kind) ? paragraph(`No ${results.expected_kind} found. Try the official name.`) : null,
-      jsxs('details',{children:[jsx('summary',{style:{cursor:'pointer',...muted},children:'Use coordinates instead'}),
-        jsxs('div',{style:{...row,marginTop:10},children:[
-          jsx('input',{style:field,value:title,onChange:e=>setTitle(e.target.value),placeholder:'Name','aria-label':'Name'}),
-          jsx('input',{style:field,value:coordinates,onChange:e=>setCoordinates(e.target.value),placeholder:'longitude, latitude','aria-label':'Longitude, latitude'}),
-          ...(hasStart ? [primary('Add stop',()=>useCoordinates('add_stop','stop')),button('End here',()=>useCoordinates('set_end','endpoint'),false,'text')] : [primary('Start here',()=>useCoordinates('set_origin','origin'))])]})]})
-    ]}) : null,
-    editable && hasStart ? jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:12},children:[
-      jsx('h3',{style:{margin:0},children:'Preferences'}),
-      jsxs('label',{style:{...row,cursor:'pointer'},children:[jsx('input',{type:'checkbox',checked:Boolean(state.round_trip),disabled:mutation.isPending,onChange:()=>action('set_round_trip',{enabled:!state.round_trip})}),'Return to the start at the end']}),
-      state.endpoint && !state.round_trip ? jsxs('div',{style:row,children:[jsx('span',{children:`Ends at ${label(state.endpoint)}`}),button('Remove end',()=>action('set_end',{endpoint:null}),false,'text')]}) : null,
-      open.length > 1 ? jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8},children:[
-        jsx('strong',{children:'Visit order'}),
-        ...state.precedence.map(([a,b],i)=>jsxs('div',{style:row,children:[jsx('span',{children:`${nameOf(a)} before ${nameOf(b)}`}),button('Remove',()=>action('precedence',{pairs:state.precedence.filter((_,n)=>n!==i)}),false,'text')]},`${a}:${b}:${i}`)),
-        jsxs('div',{style:row,children:[
-          jsx('span',{children:'Visit'}),
-          jsx('select',{style:{...field,flex:'0 1 220px',minWidth:140},'aria-label':'First',value:before,onChange:e=>setBefore(e.target.value),children:[jsx('option',{value:'',children:'choose a stop'},'placeholder'),...open.map(s=>jsx('option',{value:s.id,children:short(s.title) || s.id},s.id))]}),
-          jsx('span',{children:'before'}),
-          jsx('select',{style:{...field,flex:'0 1 220px',minWidth:140},'aria-label':'Then',value:after,onChange:e=>setAfter(e.target.value),children:[jsx('option',{value:'',children:'choose a stop'},'placeholder'),...open.map(s=>jsx('option',{value:s.id,children:short(s.title) || s.id},s.id))]}),
-          button('Add',()=>{action('precedence',{pairs:[...state.precedence,[before,after]]});setBefore('');setAfter('')},!before || !after || before===after)]})]}) : null
-    ]}) : null,
-    jsx('div',{role:'status',style:muted,children:message}), mutation.isPending?paragraph('Working…'):null
+  const empty = !hasStart && !state.stops.length
+  const canPlan = !fresh && hasStart && order.length > 0 && data.engine.available
+  const dot = (text, solid) => jsx('span',{style:{display:'grid',placeItems:'center',width:26,height:26,flexShrink:0,borderRadius:'50%',fontSize:12,fontWeight:700,background:solid?'var(--ui-accent)':'var(--ui-bg-quaternary)',color:solid?'var(--ui-bg-primary, white)':'var(--ui-text-primary)'},children:text})
+  const line = (badge, text, extra=null, k) => jsxs('li',{style:{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0'},children:[badge,jsxs('div',{style:{minWidth:0},children:[jsx(NameLines,{text}),extra]})]},k)
+  const summary = fresh
+    ? jsxs('div',{children:[
+        jsx('div',{style:{fontSize:22,fontWeight:700,letterSpacing:'-.3px'},children:`${minutes(solution.road_duration_seconds)} · ${km(solution.distance_m)}`}),
+        paragraph(`${order.length} stop${order.length===1?'':'s'}${state.round_trip?' · back to start':''}`),
+        solution.comparison?.message ? jsx('div',{style:{fontWeight:600,color:'var(--ui-accent)'},children:solution.comparison.message}) : null]})
+    : empty ? null
+    : jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-start'},children:[
+        paragraph(!hasStart ? 'Tell Hermes where you start' : order.length ? 'Not planned yet' : 'Tell Hermes where to stop'),
+        canPlan ? jsx(Button,{onClick:()=>run('solve',{solve_seconds:2}),disabled:mutation.isPending,size:'sm',children:mutation.isPending?'Planning…':'Plan route'}) : null,
+        hasStart && order.length && !data.engine.available ? paragraph('Routing engine not installed.') : null]})
+  const itinerary = empty
+    ? jsxs('div',{style:{display:'flex',flexDirection:'column',gap:6},children:[
+        jsx('strong',{children:'Tell Hermes where you’re going'}),
+        jsx('div',{style:{...muted,fontStyle:'italic'},children:'“Start at Milano Centrale, then the Duomo and Castello Sforzesco, and back.”'}),
+        jsx('div',{style:muted,children:'On your phone, share your location in Telegram to start from where you are.'})]})
+    : jsx('ol',{style:{listStyle:'none',padding:0,margin:0},children:[
+        hasStart ? line(dot('S', fresh), state.origin.title || state.origin.coordinates.join(', '), null, 'start') : null,
+        ...order.map((id,i)=>{ const stop = byId.get(id); return stop ? line(dot(fresh ? i+1 : '•', fresh), stop.title || stop.coordinates.join(', '), state.next_id===id ? jsx('div',{style:{...muted,color:'var(--ui-accent)',fontWeight:600},children:'Next'}) : null, id) : null }),
+        fresh && state.round_trip ? line(dot('S', true), (state.return_origin || state.origin)?.title || 'Start', null, 'home') : null,
+        fresh && state.endpoint && !state.round_trip ? line(dot('E', true), state.endpoint.title || state.endpoint.coordinates.join(', '), null, 'end') : null]})
+  const repair = fresh && solution.repair ? jsxs('div',{style:{...muted,borderTop:'1px solid var(--ui-stroke-tertiary)',paddingTop:10},children:[
+      jsx('div',{style:{fontWeight:600,color:'var(--ui-text-primary)'},children:solution.repair.summary}),
+      ...solution.repair.added.map(s=>jsx('div',{children:`Added ${short(s.title)} as stop ${s.position}`},'a'+s.id)),
+      ...solution.repair.removed.map(s=>jsx('div',{children:`Removed ${short(s.title)}`},'r'+s.id)),
+      ...solution.repair.moved.map(s=>jsx('div',{children:`${short(s.title)}: stop ${s.previous_position} → ${s.position}`},'m'+s.id))]}) : null
+  const nav = fresh ? jsx(Handoff,{nav:data.navigation,showQr,onToggleQr:()=>setShowQr(!showQr)}) : null
+  const visited = state.visited.length ? jsxs('details',{style:muted,children:[jsx('summary',{style:{cursor:'pointer'},children:`Visited · ${state.visited.length}`}),jsx('ul',{style:{margin:'6px 0',paddingLeft:18},children:state.visited.map(id=>jsx('li',{children:label(byId.get(id))},id))})]}) : null
+  const map = data.map_document ? jsx(SandboxedFrame,{src:'data:text/html;charset=utf-8,'+encodeURIComponent(data.map_document),sandbox:'allow-scripts',title:'Route map',style:{width:'100%',height:'100%',minHeight:compact?260:420,border:0,borderRadius:compact?10:12,display:'block'}}) : paragraph('Map unavailable.')
+  const plan = data.pending_plan ? jsx(PendingPlan,{plan:data.pending_plan,state,busy:mutation.isPending,onApply:(args)=>run('confirm_plan',args)},data.pending_plan.plan_id) : null
+  const status = message ? jsx('div',{role:'status',style:muted,children:message}) : jsx('div',{role:'status'})
+  if (compact) return jsxs('section',{'data-revision':state.revision,style:{display:'flex',flexDirection:'column',gap:12,maxWidth:720,color:'var(--ui-text-primary)'},children:[
+    plan,
+    jsx('div',{style:{height:280,border:'1px solid var(--ui-stroke-secondary)',borderRadius:10,overflow:'hidden'},children:map}),
+    summary, itinerary, nav,
+    jsx('div',{children:jsx(Button,{onClick:openRoutePane,variant:'secondary',size:'sm',children:'Show map beside the chat'})}),
+    status]})
+  // Beside the chat: the map takes the height, the itinerary sits under it.
+  return jsxs('section',{'data-revision':state.revision,style:{display:'flex',flexDirection:'column',height:'100%',minHeight:0,color:'var(--ui-text-primary)'},children:[
+    jsx('div',{style:{flex:'1 1 60%',minHeight:320,padding:10,paddingBottom:0},children:jsx('div',{style:{height:'100%',border:'1px solid var(--ui-stroke-secondary)',borderRadius:12,overflow:'hidden'},children:map})}),
+    jsxs('div',{style:{flex:'0 1 auto',maxHeight:'45%',overflowY:'auto',display:'flex',flexDirection:'column',gap:14,padding:'14px 16px'},children:[
+      plan, summary, itinerary, repair, nav, visited, status]})
   ]})
 }
 function Surface(props) {
   const connection = useValue(host.state.connectionId), profile = useValue(host.state.profile)
   return jsx(RoutingSurface,{...props,scope:[connection,profile]},JSON.stringify([connection,profile]))
 }
+// The route is talked into existence in the chat; the map docks beside it.
+let closePane = null, closedByUser = false
+function openRoutePane() {
+  if (closePane || typeof host.openWorkspace !== 'function') return
+  closedByUser = false
+  closePane = host.openWorkspace(`${ID}:map`, { title:'Route', minWidth:'24rem', dock:{ pane:'workspace', pos:'right' },
+    render: () => jsx(Surface,{}), onClose: () => { closePane = null; closedByUser = true } })
+}
+function toggleRoutePane() { if (closePane) closePane(); else openRoutePane() }
+function StatusChip() {
+  const connection = useValue(host.state.connectionId), profile = useValue(host.state.profile)
+  const query = useQuery({ queryKey:[ID, connection, profile], queryFn: () => rest('/current'), refetchInterval: 4000 })
+  const seen = useRef(null)
+  const data = query.data?.ok ? query.data : null
+  const revision = data?.state.revision
+  // A route edited from the chat brings the map in, unless the user closed it.
+  useEffect(() => {
+    if (revision == null) return
+    if (seen.current != null && revision !== seen.current && !closedByUser) openRoutePane()
+    seen.current = revision
+  }, [revision])
+  if (!data) return null
+  const state = data.state, solution = state.solution
+  const fresh = solution && data.solved_revision === state.revision
+  const left = fresh ? solution.remaining_order.length : state.stops.filter(s => !s.visited).length
+  const next = fresh && left ? short(state.stops.find(s => s.id === solution.remaining_order[0])?.title) : null
+  const text = next ? `Next: ${next} · ${left} left` : left ? `Route: ${left} stop${left===1?'':'s'}, not planned` : 'Route'
+  return jsx('button',{type:'button',onClick:toggleRoutePane,title:closePane?'Hide the route map':'Show the route map beside the chat',style:{color:next?'var(--ui-accent)':'var(--ui-text-tertiary)',fontSize:'0.6875rem',padding:'0 6px',height:'100%',background:'none',border:0,cursor:'pointer'},children:text})
+}
 export default { id:ID, name:'SolverForge Routing', register(ctx) {
   rest = ctx.rest
   return ctx.registerMany([
-    {id:'page',area:ROUTES_AREA,data:{path:'/route'},render:()=>jsx(Surface,{editable:true})},
-    {id:'nav',area:SIDEBAR_NAV_AREA,data:{path:'/route',label:'Route',codicon:'map'}},
-    {id:'route-card',area:TRANSCRIPT_DIRECTIVE_AREA,data:{name:'route',render:()=>jsx(Surface,{editable:false})}}
+    {id:'chip',area:STATUSBAR_AREAS.right,order:126,render:()=>jsx(StatusChip,{})},
+    {id:'open',area:PALETTE_AREA,data:{id:`${ID}.open`,label:'Route: show map',keywords:['route','map','stops','driving'],run:openRoutePane}},
+    {id:'route-card',area:TRANSCRIPT_DIRECTIVE_AREA,data:{name:'route',render:()=>jsx(Surface,{compact:true})}}
   ])
 }}

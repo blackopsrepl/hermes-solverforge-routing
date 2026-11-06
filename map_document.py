@@ -1,5 +1,6 @@
 """Self-contained opaque-origin map guest. No executable network dependencies."""
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,15 +15,14 @@ def _template() -> str:
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <style>""" + asset("leaflet.css") + "\n" + asset("sf-map.css") + "\n" + asset("guest.css") + """</style></head>
-<body><div id="toolbar"><button id="fit" type="button">Fit</button><span id="summary"></span></div>
-<div id="map" aria-label="Interactive street map with road route and numbered stops"></div>
+<body><div id="map" aria-label="Interactive street map with road route and numbered stops"></div>
 <p id="tiles" role="status"></p>
 <script>""" + asset("leaflet.js") + "\n</script><script>var SF = {};\n" + asset("sf-map.js") + "\n</script><script id=\"route-data\" type=\"application/json\">__ROUTE_DATA__</script><script>" + asset("guest.js") + "\n</script></body></html>"
 
 
 def _short(title):
     """Geocoder titles are full postal strings; markers show the place name."""
-    parts = [p.strip() for p in str(title or "").split(",") if p.strip()]
+    parts = [p.strip() for p in str(title or "").split(",") if p.strip() and not re.fullmatch(r"\d+", p.strip())]
     if len(parts) > 1 and parts[0].rstrip("abcdefghijklmnopqrstuvwxyz").isdigit():
         return f"{parts[1]} {parts[0]}"
     return parts[0] if parts else ""

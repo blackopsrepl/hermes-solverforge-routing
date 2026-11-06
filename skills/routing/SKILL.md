@@ -44,7 +44,7 @@ of the route; still only a suggestion), needs_choice (read item.note to the user
 far = flagged far from the other stops, kind_mismatch = e.g. "Stazione …" found no
 station, refine with the official name; same_name = same street in several towns,
 ask which), no_match or search_failed (offer to skip or refine). Never pick a far,
-wrong-kind or same-name candidate for the user. The Desktop Route page and ::route{} card
+wrong-kind or same-name candidate for the user. The Docked map pane (beside the chat) and ::route{} card
 show the same plan with one Add button. Only after the user chose, call
 route_confirm_plan(plan_id, expected_revision=plan.base_revision, choices=[{index,
 candidate_id}], skip=[indexes]); it adds everything in one revision. Refusals
@@ -82,13 +82,15 @@ exact coordinates to configured OSRM. Report:
   (one link per pair: openstreetmap.org directions take two points). Long routes are
   split into consecutive legs sharing a stop, never truncated. Say that opening a
   link sends the stop coordinates to that provider. QR codes for phones appear on
-  the Desktop Route page and card.
+  the Docked map pane and card.
 
 Map viewing/panning sends visible areas and IP to OSM tile servers. Public services
 are dev defaults, not availability guarantees. Missing engine: configure binary as a
 plain executable path, no installer/downloader. Report provider errors/unreachable
 stops, never drop stops or substitute fake coordinates/straight lines. Show
 best-found estimated driving, not proven optimal, live traffic, arrival times or
-turn-by-turn navigation. After edits solve again to repair; emit ::route{} for the
-interactive map, itinerary, navigation buttons and any pending plan. Desktop actions
-use this plugin's own SDK REST, not sessions.
+turn-by-turn navigation. After every edit or confirmed plan, call route_solve
+immediately; never leave stops unplanned after the user asks for a route. Then
+emit ::route{} in your reply: the docked map pane beside the chat updates itself,
+and the card shows the map, itinerary, navigation buttons and any pending plan.
+Desktop actions use this plugin's own SDK REST, not sessions.

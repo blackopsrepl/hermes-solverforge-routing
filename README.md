@@ -11,12 +11,14 @@ Personal, single-vehicle multi-stop driving itineraries. Supply a starting point
 - Persistent stops with stable IDs, visited history, a fixed next stop and precedence locks.
 - Revision-checked editing and publication: an older solve cannot overwrite a newer change.
 - Road geometry returned by OSRM; no straight-line fallback and no silently dropped stops.
-- Fifteen native Hermes tools, a `::route{}` chat card and a Routes page.
+- Fifteen native Hermes tools, a `::route{}` chat card in the conversation, and a
+  route map pane docked beside the chat (status-bar chip, palette command, automatic
+  open on the first chat edit).
 - Batch planning: several named places searched at once, one pending plan, one confirmation that applies everything in a single revision.
 - Shared pins from messaging apps as a one-time origin (bundled skill guidance).
 - After each solve: “N min shorter than the order you gave” (only when real), a repair diff, and Google Maps / Apple Maps / OpenStreetMap links plus a scannable QR code.
 
-The route page and chat card include an interactive OpenStreetMap street map: numbered stops, OSRM road geometry, drag to pan, zoom controls and “Fit all stops”. Coincident stops share a numbered marker. Tile failures show a visible warning while the road overlay and itinerary remain usable. Explicit address/place search, batch plans and candidate confirmation are available. Saved places and map-pin entry are not implemented. Hermes Desktop does not currently expose supported automatic geolocation.
+The route is edited in the chat. The map beside it is the viewer: an interactive OpenStreetMap street map that fills the pane, with the itinerary below it. The start marker reads “S”; stops are numbered only once a plan exists, and until then they show “•”. “Fit” sits next to the zoom controls and appears with the first stop. Coincident stops share a marker, tile failures show “Map tiles unavailable.” while the overlay and itinerary remain usable, and every update refetches the current revision. Explicit address/place search, batch plans and candidate confirmation are available. Saved places and map-pin entry are not implemented. Hermes Desktop does not currently expose supported automatic geolocation.
 
 ## Shared location from a messaging app
 
@@ -59,8 +61,8 @@ another kind are far weaker). Preselection is a suggestion shown for review. `ro
 origin, stops and end policy atomically in one revision; it refuses unresolved
 ambiguous/no-match items, candidates from another item, expired plans, another
 profile's plans, and plans made for an older revision (HTTP 409), writing nothing.
-The Route page and `::route{}` chat card show the pending plan with radio choices and
-a single “Add N places in one change” button, followed by the usual confirmation.
+The `::route{}` chat card and the docked map pane show the pending plan with per-place
+choices and a single “Add N places” action.
 
 ## After solving: value and navigation handoff
 

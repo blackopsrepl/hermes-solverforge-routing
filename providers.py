@@ -5,14 +5,18 @@ OSRM server. No geocoding or straight-line fallback is performed.
 """
 from __future__ import annotations
 
+import errno
 import json
 import math
+import socket
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Sequence
+from unittest.mock import patch
 
 
 class ProviderError(ValueError):
@@ -55,6 +59,34 @@ class _HTTPSOnly(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+@contextmanager
+def _ipv4_only():
+    """Retry network requests over IPv4 on hosts whose IPv6 egress is broken.
+
+    Starlink-style CGNAT homes often advertise IPv6 that cannot reach the
+    internet; urllib then fails with "Network is unreachable" even though the
+    service is healthy over IPv4.
+    """
+
+    real = socket.getaddrinfo
+
+    def only_v4(*args, **kwargs):
+        return [entry for entry in real(*args, **kwargs) if entry[0] == socket.AF_INET]
+
+    with patch.object(socket, "getaddrinfo", only_v4):
+        yield
+
+
+def _open_once(opener, request, timeout):
+    try:
+        return opener.open(request, timeout=timeout)
+    except OSError as exc:
+        if getattr(exc, "errno", None) not in (errno.EHOSTUNREACH, errno.ENETUNREACH):
+            raise
+        with _ipv4_only():
+            return opener.open(request, timeout=timeout)
+
+
 @dataclass
 class OSRMProvider:
     base_url: str = "https://router.project-osrm.org"
@@ -83,7 +115,7 @@ class OSRMProvider:
         start = time.monotonic()
         try:
             request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "hermes-solverforge-routing/0.1"})
-            with urllib.request.build_opener(_HTTPSOnly()).open(request, timeout=self.timeout) as response:
+            with _open_once(urllib.request.build_opener(_HTTPSOnly()), request, self.timeout) as response:
                 chunks, size = [], 0
                 while True:
                     if time.monotonic() - start > self.timeout:
