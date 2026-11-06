@@ -146,13 +146,13 @@ try:
             page.wait_for_timeout(800)
         assert ','.join(doclegs) in (guest_legs or ''), (guest_legs, doclegs)
         leg_paths = frame.locator('.leaflet-overlay-pane path')
-        if leg_paths.count() != len(doclegs):
+        # Each hop draws a white casing under its coloured line.
+        if leg_paths.count() != 2 * len(doclegs):
             raise AssertionError({
                 'legs': doclegs, 'guest': guest_legs,
                 'paths': leg_paths.count(),
                 'arrows': frame.locator('.route-arrow').count(),
-                'polylines': frame.locator('.leaflet-overlay-pane svg path').count(),
-            })  # one leg per travel hop
+            })
         arrows = frame.locator('.route-arrow')
         assert arrows.count() >= max(0, len(doclegs) - 1), (arrows.count(), doclegs)
         expect(frame.locator('.sf-marker-stop')).to_have_count(3)
@@ -403,7 +403,8 @@ try:
         doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
         doclegs = re.findall(r'geo:\d+_\d+', doc)
         assert len(doclegs) >= 4, doclegs  # round trip: origin, stops, return home
-        assert frame.locator('.leaflet-overlay-pane path').count() == len(doclegs)
+        # Round trip: a white casing and a coloured line per hop.
+        assert frame.locator('.leaflet-overlay-pane path').count() == 2 * len(doclegs)
         assert frame.locator('.route-arrow').count() >= len(doclegs) - 1
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']

@@ -29,8 +29,8 @@
   var LEG_COLORS = ["#1d4f9c", "#2e7cc4", "#63a4dd", "#9ec5e8"];
   var toLatLng = function (p) { return [p[0], p[1]]; };
   var heading = function (a, b) {
-    var scale = Math.max(Math.cos(a[1] * Math.PI / 180), 0.2);
-    return Math.atan2((b[0] - a[0]) * scale, b[1] - a[1]) * 180 / Math.PI;
+    var scale = Math.max(Math.cos(a[0] * Math.PI / 180), 0.2);
+    return Math.atan2((b[1] - a[1]) * scale, b[0] - a[0]) * 180 / Math.PI;
   };
   function drawLegs() {
     var geo = data.geometry.map(function (p) { return [p[1], p[0]]; });
@@ -42,7 +42,9 @@
     legs.forEach(function (pair, li) {
       var leg = geo.slice(pair[0], pair[1] + 1).map(toLatLng);
       if (leg.length < 2) return;
-      ctrl.drawRoute({ points: leg, color: LEG_COLORS[li % LEG_COLORS.length], weight: 5, opacity: 0.95 });
+      var color = LEG_COLORS[li % LEG_COLORS.length];
+      ctrl.drawRoute({ points: leg, color: '#ffffff', weight: 8, opacity: 0.85 });
+      ctrl.drawRoute({ points: leg, color: color, weight: 5, opacity: 1 });
       var budget = Math.min(12, Math.ceil((pair[1] - pair[0]) / Math.max(8, Math.floor(total / 45))));
       var step = Math.max(4, Math.floor((pair[1] - pair[0]) / budget));
       for (var k = step; k < leg.length - Math.max(2, Math.floor(step / 2)); k += step) {
@@ -51,7 +53,7 @@
         L.marker(leg[k], {
           interactive: false,
           keyboard: false,
-          icon: L.divIcon({ className: "route-arrow", iconSize: [14, 14], html: '<div style="transform:rotate(' + deg + 'deg)">➤</div>' })
+          icon: L.divIcon({ className: "route-arrow", iconSize: [14, 14], iconAnchor: [7, 7], html: '<div style="transform:rotate(' + deg + 'deg)">➤</div>' })
         }).addTo(map);
         arrowsDrawn++;
       }

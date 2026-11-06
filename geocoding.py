@@ -20,6 +20,8 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from unittest.mock import patch
+
 from uuid import uuid4
 
 if __package__:
@@ -45,6 +47,19 @@ ROAD_TYPES = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassi
               "living_street", "pedestrian", "service", "road", "motorway_link", "trunk_link", "primary_link",
               "secondary_link", "tertiary_link"}
 KIND_NAMES = {"station": "railway station", "street": "street"}
+
+
+_OPEN_ONCE = [None]
+
+
+def _retry_open():
+    try:
+        from .providers import _open_once
+        return _open_once
+    except ImportError:                          # loaded standalone (dashboard tests)
+        def plain(opener, request, timeout):
+            return opener.open(request, timeout=timeout)
+        return plain
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -190,7 +205,10 @@ class NominatimGeocoder:
                 time.sleep(max(0, min(1.05, 1.05 - elapsed)))
                 request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "hermes-solverforge-routing/0.1 (personal route planning; explicit place search)"})
                 started = time.monotonic()
-                with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+                # Same IPv4 retry as OSRM: one IPv6 failure must not lose a search.
+                if _OPEN_ONCE[0] is None:
+                    _OPEN_ONCE[0] = _retry_open()
+                with _OPEN_ONCE[0](urllib.request.build_opener(NoRedirect()), request, 15) as response:
                     chunks, size = [], 0
                     while True:
                         if time.monotonic() - started > 15:
