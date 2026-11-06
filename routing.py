@@ -134,13 +134,40 @@ def validate_result(request: dict, result: Any) -> list[int]:
 
 
 class RouteService:
-    def __init__(self, database_path: str | Path, *, provider=None, engine=None, max_stops: int = 80):
+    def __init__(self, database_path: str | Path, *, provider=None, engine=None, max_stops: int = 80, geocoder=None):
         if type(max_stops) is not int or not 1 <= max_stops <= 98:
             raise ValueError("max_stops must be 1..98")
         self.store = RouteStore(database_path)
         self.provider = provider if provider is not None else OSRMProvider()
         self.engine = engine
         self.max_stops = max_stops
+        if __package__:
+            from .geocoding import LocationSearch, NominatimGeocoder
+        else:
+            from geocoding import LocationSearch, NominatimGeocoder
+        self.locations = LocationSearch(self.store, geocoder if geocoder is not None else NominatimGeocoder())
+
+    def search_locations(self, query: str, region: str = "") -> dict:
+        return self.locations.search(query, region)
+
+    def confirm_location(self, candidate_id: str, role: str, *, expected_revision: int) -> dict:
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected_revision must be a nonnegative integer")
+        if role not in ("origin", "stop", "endpoint"):
+            raise ValueError("role must be origin, stop or endpoint")
+        def edit(state):
+            selected = location(self.locations.resolve(candidate_id))
+            if role == "origin":
+                state.update(origin=selected, return_origin=location(selected))
+            elif role == "endpoint":
+                if state["round_trip"]:
+                    raise ValueError("endpoint and round trip are mutually exclusive")
+                state["endpoint"] = {**selected, "id": "endpoint:" + uuid4().hex}
+            else:
+                if len(state["stops"]) >= self.max_stops:
+                    raise ValueError("maximum stops exceeded")
+                state["stops"].append({**selected, "id": uuid4().hex, "visited": False})
+        return self.store.mutate(edit, expected_revision)
 
     def get_route(self) -> dict:
         return self.store.read()

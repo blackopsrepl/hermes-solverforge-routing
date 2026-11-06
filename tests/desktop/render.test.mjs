@@ -27,7 +27,14 @@ test('current road geometry, stable home, driving disclaimers and coordinate con
  assert.ok(html.includes('tiles fail'))
  assert.ok(!/\beval\(|new Function|import\(|\bfetch\(|https?:/.test(source))
 })
-test('pending edits hide geometry and label unsolved input order',()=>{
+test('explicit search controls and disclosure without autocomplete',()=>{
+ const html=renderPage({data:data()})
+ for(const text of ['Place or address','Region context','Search sends exactly','no autocomplete or IP guessing','Do not send confidential locations','Or enter exact coordinates']) assert.ok(html.includes(text),text)
+ assert.ok(source.includes("'/actions/search_locations'"))
+ assert.ok(source.includes("action('confirm_location'"))
+ assert.ok(!source.includes('onKeyUp'))
+})
+test('pending edits hide geometry and label unsolved input order' ,()=>{
  const html=renderPage({data:data()})
  assert.ok(html.includes('pending solve'))
  assert.ok(html.includes('input order, not a proposed route'))

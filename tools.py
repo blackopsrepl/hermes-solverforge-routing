@@ -37,9 +37,11 @@ class RoutingTools:
             if not isinstance(args, dict) or set(args) - set(schema["properties"]) or any(k not in args for k in schema["required"]):
                 return self.fail("invalid_arguments", "Supply the declared fields, including expected_revision on every edit or solve.")
             action = name.removeprefix("route_")
-            if action not in ("status", "current") and (type(args["expected_revision"]) is not int or args["expected_revision"] < 0):
+            if action not in ("status", "current", "search_locations") and (type(args["expected_revision"]) is not int or args["expected_revision"] < 0):
                 return self.fail("invalid_arguments", "expected_revision must be a nonnegative integer.")
             service, engine = self.factory()
+            if action == "search_locations":
+                return {"ok": True, **service.search_locations(**args)}
             available = engine.is_file() and os.access(engine, os.X_OK)
             if action in ("status", "current"):
                 state = service.get_route()
@@ -54,6 +56,7 @@ class RoutingTools:
                     "revision": state["revision"], "solved_revision": solved,
                     "freshness": "current" if solved == state["revision"] else "pending",
                     "engine": {"available": available, "path": str(engine)},
+                    "geocoder": {"url": service.locations.geocoder.url},
                     "provider": {"name": "OSRM", "url": service.provider.base_url,
                                  "disclosure": "Solve sends exact coordinates to this server. No live traffic."},
                     "estimate": "Estimated driving only", "quality": "best-found, not proven optimal"}

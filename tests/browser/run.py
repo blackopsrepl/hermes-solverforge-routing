@@ -83,9 +83,33 @@ try:
             assert page.get_by_role('alert').count() == 1
             assert current()['revision'] == before  # selection alone must not write
             return confirm()
-        place('Milano Centrale', '9.2041,45.4851', 'Set origin')
-        first = place('Duomo', '9.1900,45.4642', 'Add stop')['state']['stops'][0]['id']
-        second = place('Castello Sforzesco', '9.1795,45.4700', 'Add stop')['state']['stops'][1]['id']
+        searches = []
+        def named_place(query, action):
+            before = current()['revision']
+            count = len([r for r in responses if '/actions/search_locations' in r['url']])
+            page.get_by_label('Place or address', exact=True).fill(query)
+            page.get_by_label('Region context', exact=True).fill('Milano, Italia')
+            page.wait_for_timeout(150)
+            assert count == len([r for r in responses if '/actions/search_locations' in r['url']]), 'typing must not search'
+            with page.expect_response(lambda r:'/actions/search_locations' in r.url) as response:
+                page.get_by_role('button',name='Search',exact=True).click()
+            result = response.value.json()
+            assert result['ok'], result
+            assert result['candidates'], result
+            searches.append(result)
+            expect(page.get_by_role('radio').first).to_be_visible()
+            assert not page.get_by_role('radio').first.is_checked(), 'no automatic choice'
+            page.get_by_role('radio').first.check()
+            assert current()['revision'] == before
+            path = ARTIFACTS / ('search-' + query.replace(' ', '-') + '.png')
+            page.screenshot(path=str(path),full_page=True)
+            screenshots.append(str(path))
+            page.get_by_role('button',name=action,exact=True).click()
+            assert current()['revision'] == before
+            return confirm()
+        named_place('Milano Centrale', 'Use as origin')
+        first = named_place('Duomo di Milano', 'Add named stop')['state']['stops'][0]['id']
+        second = named_place('Castello Sforzesco', 'Add named stop')['state']['stops'][1]['id']
         page.get_by_role('button',name='Set next',exact=True).nth(1).click()
         assert confirm()['state']['next_id'] == second
         page.get_by_role('button',name='Solve road route',exact=True).click()
@@ -135,6 +159,10 @@ try:
         frame.get_by_role('button',name='Fit all stops',exact=True).click()
         map_fits()
         def shot(name):
+            # Chromium may not repaint an offscreen opaque-origin iframe after
+            # a route edit. Bring it into view before full-page capture.
+            page.locator('iframe').scroll_into_view_if_needed()
+            page.wait_for_timeout(300)
             path = ARTIFACTS / name
             page.screenshot(path=str(path),full_page=True)
             screenshots.append(str(path))
@@ -165,6 +193,19 @@ try:
         expect(page.get_by_label('Before stop',exact=True)).to_be_visible()
         shot('route-constraints.png')
         page.get_by_text('Constraints · 0 order locks · next stop fixed',exact=True).click()
+        repaired = named_place('Teatro alla Scala', 'Add named stop')
+        assert repaired['state']['solution'] is None
+        assert len(repaired['state']['stops']) == 3
+        page.get_by_role('button',name='Solve road route',exact=True).click()
+        repaired = confirm()
+        assert len(repaired['state']['solution']['remaining_order']) == 3
+        assert repaired['state']['solution']['remaining_order'][0] == second
+        assert repaired['state']['solution']['geometry']['coordinates']
+        (ARTIFACTS/'geocoding-evidence.json').write_text(json.dumps({'searches':searches,'repaired':repaired},indent=2,ensure_ascii=False))
+        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
+        expect(frame.locator('.leaflet-tile-loaded').first).to_be_visible(timeout=30000)
+        map_fits()
+        shot('route-named-repair.png')
         # Deliberate concurrent change after selecting an edit: real CAS refusal.
         page.get_by_role('button',name='Remove',exact=True).first.click()
         shot('route-confirmation.png')
@@ -175,15 +216,15 @@ try:
             page.get_by_role('button',name='Confirm',exact=True).click()
         assert refused.value.status == 409
         expect(page.get_by_role('status')).to_contain_text('changed')
-        assert len(current()['state']['stops']) == 2
+        assert len(current()['state']['stops']) == 3
         expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(0)
         shot('route-stale-refusal.png')
         # Visit fixed next, verify moving origin and retained history in real DB.
         page.get_by_role('button',name='Mark visited',exact=True).nth(1).click()
         visited = confirm()['state']
         assert visited['visited'] == [second]
-        assert visited['origin']['title'] == 'Castello Sforzesco'
-        assert visited['return_origin']['title'] == 'Milano Centrale'
+        assert 'Castello Sforzesco' in visited['origin']['title']
+        assert 'Milano Centrale' in visited['return_origin']['title']
         page.get_by_text('Visited history · 1',exact=True).click()
         shot('route-visited.png')
         page.set_viewport_size({'width':390,'height':844})

@@ -6,14 +6,14 @@ Personal, single-vehicle multi-stop driving itineraries. Supply a starting point
 
 ## What works in the first slice
 
-- Explicit longitude/latitude coordinates with location titles. Origin, open end, distinct destination or return to the original starting point.
+- Search place/address names with explicit city/region context, inspect candidates and confirm each by ID. Explicit longitude/latitude coordinates with location titles remain supported. Origin, open end, distinct destination or return to the original starting point.
 - Asymmetric driving costs: going from A to B need not cost the same as B to A.
 - Persistent stops with stable IDs, visited history, a fixed next stop and precedence locks.
 - Revision-checked editing and publication: an older solve cannot overwrite a newer change.
 - Road geometry returned by OSRM; no straight-line fallback and no silently dropped stops.
-- Eleven native Hermes tools, a `::route{}` chat card and a Routes page.
+- Thirteen native Hermes tools, a `::route{}` chat card and a Routes page.
 
-The route page and chat card include an interactive OpenStreetMap street map: numbered stops, OSRM road geometry, drag to pan, zoom controls and “Fit all stops”. Coincident stops share a numbered marker. Tile failures show a visible warning while the road overlay and itinerary remain usable. Address search, ambiguous-address confirmation, saved places, map-pin entry and shared-location parsing are not yet implemented. Hermes Desktop does not currently expose supported automatic geolocation.
+The route page and chat card include an interactive OpenStreetMap street map: numbered stops, OSRM road geometry, drag to pan, zoom controls and “Fit all stops”. Coincident stops share a numbered marker. Tile failures show a visible warning while the road overlay and itinerary remain usable. Explicit address/place search and candidate confirmation are available. Saved places, map-pin entry and shared-location parsing are not implemented. Hermes Desktop does not currently expose supported automatic geolocation.
 
 ## Route repair
 
@@ -38,6 +38,58 @@ Solving sends exact supplied coordinates to `https://router.project-osrm.org` fo
 Viewing the map loads raster tiles directly from `https://a.tile.openstreetmap.org`, `https://b.tile.openstreetmap.org` and `https://c.tile.openstreetmap.org`. Viewing, panning and zooming disclose the visible area and your IP to those servers. This happens independently of solving. Tiles need network access; no offline basemap or availability guarantee is provided. Pan/zoom is local guest interaction, not location tracking or route editing.
 
 Requests have time and response-size limits. Snaps over 250 metres are refused by default. Unreachable matrix entries are currently refused rather than silently excluding stops. The Rust engine runs as a bounded subprocess; no shell command construction, telemetry, automatic downloads or background location tracking is used. Locations and route history persist locally; no credentials are required.
+
+
+## Place resolution and public-provider policy
+
+Give Hermes a list of locations and an explicit region (for example Milano, Italia).
+`route_search_locations(query, region)` returns at most five unverified map candidates
+with display labels, coordinates, opaque candidate IDs and uncertainty. It **never**
+chooses a match, even for a single result. Ask the user which candidate they mean;
+refine region/query when names are duplicated or no match is suitable. There is no
+IP guessing, device location, reverse geocoding, autocomplete or bulk lookup.
+`route_confirm_location(candidate_id, role, expected_revision)` applies the selected
+candidate as `origin`, `stop` or `endpoint`. IDs are persisted in the active profile,
+expire after 15 minutes and cannot be supplied as arbitrary coordinates. Stale
+revisions, another profile's IDs and expired IDs are refused. Coordinate tools
+`route_set_origin`, `route_add_stop`, `route_set_end` continue to work.
+
+Desktop has an explicit **Search** button, query/region fields, an unselected candidate
+list, role buttons and a final confirmation showing the selected location. Typing
+never performs network requests. It uses only this plugin's own API through the SDK,
+not agent requests or sessions. Route edits invalidate the solution; solve again to
+repair after adding a named stop.
+
+The development default is Nominatim `https://nominatim.openstreetmap.org/search`.
+Set `geocoder_url` to a Nominatim-compatible HTTPS search endpoint to switch away;
+credentials, URL query parameters, redirects and non-HTTPS URLs are refused. The
+public service has no availability guarantee, is not a production SLA, and must
+not receive confidential/personal addresses. Its usage policy is
+<https://operations.osmfoundation.org/policies/nominatim/>. Search shows the exact
+query sent (`query` plus `, region` when supplied), destination and cache status.
+The provider also sees the request IP. Geocoding data © OpenStreetMap contributors
+(ODbL), via Nominatim. These are map matches, not guaranteed accessible entrances;
+road snaps can still be refused. No fabricated or straight-line fallback is used.
+
+Requests use a descriptive plugin User-Agent, no retries, a 15-second socket timeout,
+a 256-KiB response limit and five-result limit. A shared OS-user file lock paces all
+plugin processes, service instances and profiles to at most one request per second
+(with at least 1.05 seconds after each request completes). This does not coordinate
+separate computers/users behind one IP: do not deploy multiple such installations
+against the public endpoint as an aggregate service. Cache entries use exact
+provider URL/query/region keys in the profile database and expire after 24 hours;
+there are at most 256 entries and 1280 pending candidate records. Expired records
+are pruned on search (not by a background worker); eviction can require re-search.
+Search queries, candidates and route locations persist in that private database.
+Provider errors are reported, not silently retried. Solving and map tiles have the
+separate coordinate/visible-area disclosures above. No credentials are needed.
+
+The opt-in browser test is also the real geocoding live test: it searches public
+Milan landmarks on demand, confirms choices, solves through OSRM + Rust, adds
+Teatro alla Scala by name and repairs. `geocoding-evidence.json` records exact real
+queries/candidates and the repaired solution. No fake geocoder is used there;
+offline tests label their synthetic provider and exercise real SQLite, expiry,
+ambiguity, stale revisions, profile isolation and shared request pacing.
 
 ## Development
 

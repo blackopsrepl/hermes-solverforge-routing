@@ -2,11 +2,13 @@ manifest_version: 2
 name: solverforge-routing
 version: 0.1.0
 label: SolverForge Routing
-description: Personal coordinate-based, single-vehicle driving itineraries. OSRM receives coordinates when solving; best-found driving estimates, not navigation or live traffic.
+description: Personal place-search or coordinate-based, single-vehicle driving itineraries. Explicit searches send query and region to Nominatim; OSRM receives coordinates when solving; best-found driving estimates, not navigation or live traffic.
 author: blackopsrepl
 license: Apache-2.0
 requires_hermes: ">=0.22.2"
 provides_tools:
+  - route_search_locations
+  - route_confirm_location
   - route_status
   - route_current
   - route_set_origin
@@ -21,6 +23,11 @@ provides_tools:
 provides_hooks: []
 capabilities: []
 config_schema:
+  geocoder_url:
+    type: str
+    default: "https://nominatim.openstreetmap.org/search"
+    label: Nominatim-compatible HTTPS search URL
+    description: Public development default, no availability guarantee. Explicit searches disclose query and region. No credentials; switch provider here. No autocomplete; user-wide pacing and profile cache apply.
   binary:
     type: str
     default: ""

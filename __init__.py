@@ -20,7 +20,9 @@ def service(get_config):
         raise ValueError("binary must be a plain executable path")
     development = Path(__file__).parent / "engine/target/release/solverforge-routing"
     engine = Path(binary).expanduser() if binary else (development if development.is_file() else root / "bin/solverforge-routing")
-    return core().RouteService(root / "routing.db", engine=[str(engine)]), engine
+    from .geocoding import NominatimGeocoder, DEFAULT_URL
+    geocoder = NominatimGeocoder(get_config("geocoder_url", DEFAULT_URL))
+    return core().RouteService(root / "routing.db", engine=[str(engine)], geocoder=geocoder), engine
 
 
 def register(ctx):

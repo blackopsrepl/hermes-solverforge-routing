@@ -1,4 +1,4 @@
-"""Coordinates-only routing tool contract."""
+"""Explicit search/confirmation and coordinate routing tool contracts."""
 LOCATION = {"type": "object", "additionalProperties": False, "properties": {
     "title": {"type": "string", "maxLength": 1000},
     "coordinates": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2,
@@ -6,6 +6,8 @@ LOCATION = {"type": "object", "additionalProperties": False, "properties": {
     "required": ["coordinates"]}
 REVISION = {"type": "integer", "minimum": 0, "description": "Latest current revision; stale writes are refused."}
 DEFINITIONS = {
+    "search_locations": ("On-demand place search only. Sends exact query plus explicit region to configured Nominatim; returns unverified candidates, never selects. Ask user to choose before confirmation; no autocomplete or IP guessing.", {"query": {"type": "string", "minLength": 1, "maxLength": 300}, "region": {"type": "string", "maxLength": 200}}),
+    "confirm_location": ("Confirm a user-chosen unexpired candidate from this profile as origin, stop or endpoint. Never choose an ambiguous match silently.", {"candidate_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"}, "role": {"type": "string", "enum": ["origin", "stop", "endpoint"]}}),
     "status": ("Check engine availability and current route revision. Does not install anything.", {}),
     "current": ("Read the personal route, supplied origin, stops and road solution.", {}),
     "set_origin": ("Set an explicitly supplied coordinate origin.", {"origin": LOCATION}),
@@ -20,7 +22,7 @@ DEFINITIONS = {
 }
 SCHEMAS = []
 for action, (description, properties) in DEFINITIONS.items():
-    editable = action not in ("status", "current")
+    editable = action not in ("status", "current", "search_locations")
     fields = {**properties, **({"expected_revision": REVISION} if editable else {})}
     required = list(fields) if action != "solve" else ["expected_revision"]
     SCHEMAS.append({"name": "route_" + action, "description": description,

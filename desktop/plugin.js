@@ -15,6 +15,11 @@ function RoutingSurface({ editable = false, scope }) {
   const key = [ID, ...scope]
   const query = useQuery({ queryKey: key, queryFn: () => rest('/current'), refetchInterval: 15000 })
   const [message, setMessage] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [region, setRegion] = useState('')
+  const [results, setResults] = useState(null)
+  const [chosen, setChosen] = useState(null)
+  const [searching, setSearching] = useState(false)
   const [title, setTitle] = useState('')
   const [coordinates, setCoordinates] = useState('')
   const [pending, setPending] = useState(null)
@@ -32,6 +37,18 @@ function RoutingSurface({ editable = false, scope }) {
   const order = fresh ? solution.remaining_order : state.stops.filter(s => !s.visited).map(s => s.id)
   const action = (name,args={}) => setPending({action:name,args:{...args,expected_revision:state.revision}})
   const button = (text, click, disabled=false) => jsx(Button,{onClick:click,disabled:disabled || mutation.isPending,children:text},text)
+  const search = async () => {
+    if (host.state.connectionId.get() !== scope[0] || host.state.profile.get() !== scope[1]) return
+    setSearching(true); setResults(null); setChosen(null)
+    try {
+      const result = await rest('/actions/search_locations', {method:'POST',body:{query:searchQuery,region}})
+      if (result.ok) setResults(result)
+      else setMessage(result.error?.message || 'Search failed.')
+    } catch (error) { setMessage(error.message || 'Search unavailable. No location selected.') }
+    finally { setSearching(false) }
+  }
+  const pendingCandidate = results?.candidates.find(c=>c.candidate_id===pending?.args.candidate_id)
+  const confirmedLabel = pendingCandidate ? label({title:pendingCandidate.label,coordinates:pendingCandidate.coordinates}) : 'expired or unavailable candidate (search again)'
   const home = state.return_origin || state.return_location || state.home || state.start_origin
   return jsxs('section',{style:{padding:24,maxWidth:1120,margin:'0 auto',display:'flex',flexDirection:'column',gap:14,color:'var(--ui-text-primary)',fontFamily:'inherit'},children:[
     jsxs('header',{style:{...row,justifyContent:'space-between'},children:[jsxs('div',{children:[jsx('h2',{style:{margin:'0 0 4px',fontSize:25,letterSpacing:'-.5px'},children:'Your driving route'}),paragraph(`Active profile: ${scope[1]} · current shared route, not a saved historical itinerary`)]}),button('Refresh',()=>query.refetch())]}),
@@ -51,7 +68,15 @@ function RoutingSurface({ editable = false, scope }) {
       state.visited.length ? jsxs('details',{style:{marginTop:12},children:[jsx('summary',{children:`Visited history · ${state.visited.length}`}),jsx('ul',{children:state.visited.map(id=>jsx('li',{children:label(byId.get(id))},id))})]}):null
     ]}),
     editable ? jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:12},children:[
-      jsx('h3',{style:{margin:0},children:'Add a supplied location'}),
+      jsx('h3',{style:{margin:0},children:'Find an address or place'}),
+      jsxs('div',{style:row,children:[jsx('input',{style:field,value:searchQuery,disabled:searching,maxLength:300,onChange:e=>{setSearchQuery(e.target.value);setResults(null);setChosen(null)},'aria-label':'Place or address',placeholder:'Place or street address'}),jsx('input',{style:field,value:region,disabled:searching,maxLength:200,onChange:e=>{setRegion(e.target.value);setResults(null);setChosen(null)},'aria-label':'Region context',placeholder:'City, region, country'})]}),
+      paragraph(`Search sends exactly “${searchQuery}${region?', '+region:''}” to ${data.geocoder?.url || 'the configured geocoder'} unless cached. Explicit search only; no autocomplete or IP guessing. Do not send confidential locations.`),
+      button(searching?'Searching…':'Search',search,searching || !searchQuery.trim()),
+      results ? jsxs('div',{children:[paragraph(`Query sent / cached: “${results.provider_query}” · ${results.cached?'profile cache':'provider response'}. ${results.attribution}`),paragraph(results.uncertainty),
+        jsx('ul',{style:{paddingLeft:20},children:results.candidates.map(candidate=>jsx('li',{style:{marginBottom:12},children:jsxs('label',{style:{display:'block',overflowWrap:'anywhere'},children:[jsx('input',{type:'radio',name:'candidate',checked:chosen===candidate.candidate_id,onChange:()=>setChosen(candidate.candidate_id)}),` ${candidate.label} (${candidate.coordinates.join(', ')})`,paragraph(candidate.uncertainty)]})},candidate.candidate_id))}),
+        !results.candidates.length?paragraph('No matches. Refine the place and region, then Search again.'):null,
+        jsxs('div',{style:row,children:[['Use as origin','origin'],['Add named stop','stop'],['Use as endpoint','endpoint']].map(([text,role])=>button(text,()=>action('confirm_location',{candidate_id:chosen,role}),!chosen))})]}):null,
+      jsx('h3',{style:{margin:0},children:'Or enter exact coordinates'}),
       jsxs('div',{style:row,children:[jsx('input',{style:field,value:title,onChange:e=>setTitle(e.target.value),placeholder:'Location title','aria-label':'Location title'}),
       jsx('input',{style:field,value:coordinates,onChange:e=>setCoordinates(e.target.value),placeholder:'longitude, latitude','aria-label':'Longitude, latitude'})]}),
       jsxs('div',{style:row,children:[...[['Set origin','set_origin','origin'],['Add stop','add_stop','stop'],['Set endpoint','set_end','endpoint']].map(([text,name,field])=>button(text,()=>{const parts=coordinates.split(',').map(s=>s.trim());if(parts.length!==2 || parts.some(s=>!s || !Number.isFinite(Number(s)))){setMessage('Supply two numeric coordinates: longitude, latitude.');return}action(name,{[field]:{title,coordinates:parts.map(Number)}})})),
@@ -65,7 +90,7 @@ function RoutingSurface({ editable = false, scope }) {
       jsx('ul',{children:state.precedence.map(([a,b],i)=>jsxs('li',{children:[`${label(byId.get(a))} before ${label(byId.get(b))}`,button('Remove order lock',()=>action('precedence',{pairs:state.precedence.filter((_,n)=>n!==i)}))]},`${a}:${b}:${i}`))}),
       ]})]}),
       button('Solve road route',()=>action('solve',{solve_seconds:2}),!data.engine.available),
-      pending ? jsxs('div',{style:{...panel,borderColor:'var(--ui-accent)'},role:'alert',children:[paragraph(`Confirm ${pending.action.replaceAll('_',' ')} for revision ${pending.args.expected_revision}? ${pending.action==='solve'?'Exact coordinates will be sent to OSRM.':'This changes the stored route.'}`),button('Confirm',()=>mutation.mutate(pending)),button('Cancel',()=>setPending(null))]}):null,
+      pending ? jsxs('div',{style:{...panel,borderColor:'var(--ui-accent)'},role:'alert',children:[paragraph(`Confirm ${pending.action.replaceAll('_',' ')} for revision ${pending.args.expected_revision}? ${pending.action==='solve'?'Exact coordinates will be sent to OSRM.':pending.action==='confirm_location'?`Use ${confirmedLabel} as ${pending.args.role}. This changes the stored route.`:'This changes the stored route.'}`),button('Confirm',()=>mutation.mutate(pending)),button('Cancel',()=>setPending(null))]}):null,
       jsx('div',{role:'status',children:message}), mutation.isPending?paragraph('Working… edits disabled until complete.'):null
     ]}):paragraph('Read-only current route · manage deliberate edits on the Route page.'),
   ]})

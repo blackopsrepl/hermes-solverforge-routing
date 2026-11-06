@@ -176,3 +176,41 @@ def test_lone_backend_and_errors(tmp_path, monkeypatch):
     assert client.get('/current').json()['map_document'] == current['map_document']
     assert client.post('/actions/set_next',json={'expected_revision':0,'stop_id':None}).status_code == 409
     assert client.post('/actions/install',json={}).json()['error']['code'] == 'unknown_action'
+
+
+def test_search_confirmation_api_contract_and_profile_scope(tmp_path, monkeypatch):
+    api = load('routing_geocoding_dashboard_test', ROOT / 'dashboard/plugin_api.py')
+    package = api._package()
+    monkeypatch.setattr(package, 'data_dir', lambda: tmp_path / 'one')
+    monkeypatch.setattr(api, '_config', lambda key, default=None: default)
+    import importlib
+    geocoding = importlib.import_module('.geocoding', package.__name__)
+    calls = []
+    def synthetic_search(self, query, region):
+        calls.append((query, region))
+        return [{'label':'San Marco, Milano', 'coordinates':[9.18,45.47]},
+                {'label':'San Marco, Venezia', 'coordinates':[12.34,45.43]}]
+    monkeypatch.setattr(geocoding.NominatimGeocoder, 'search', synthetic_search)
+    app = FastAPI(); app.include_router(api.router)
+    client = TestClient(app)
+    result = client.post('/actions/search_locations', json={'query':'San Marco','region':'Italia'}).json()
+    assert result['ok'] and len(result['candidates']) == 2
+    candidate = result['candidates'][1]['candidate_id']
+    assert client.get('/current').json()['revision'] == 0
+    for bad in [{}, {'candidate_id':candidate,'role':'origin'},
+                {'candidate_id':candidate,'role':'origin','expected_revision':True},
+                {'candidate_id':candidate,'role':'origin','expected_revision':0,'coordinates':[9,45]},
+                {'candidate_id':'0'*32,'role':'origin','expected_revision':0}]:
+        assert client.post('/actions/confirm_location', json=bad).status_code == 400
+    body = {'candidate_id':candidate,'role':'origin','expected_revision':0}
+    chosen = client.post('/actions/confirm_location', json=body).json()
+    assert chosen['state']['origin']['coordinates'] == [12.34,45.43]
+    assert client.get('/current').json()['state']['origin'] == chosen['state']['origin']
+    assert client.post('/actions/confirm_location', json=body).status_code == 409
+    body.update(role='endpoint',expected_revision=1)
+    assert client.post('/actions/confirm_location', json=body).json()['state']['endpoint']['title'] == 'San Marco, Venezia'
+    monkeypatch.setattr(package, 'data_dir', lambda: tmp_path / 'two')
+    body['expected_revision'] = 0
+    assert client.post('/actions/confirm_location', json=body).status_code == 400
+    assert client.get('/current').json()['revision'] == 0
+    assert len(calls) == 1
