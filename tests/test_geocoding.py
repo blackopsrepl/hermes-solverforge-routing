@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from geocoding import MAX_RESULTS, NominatimGeocoder
-from providers import ProviderError
+from geo import ProviderError
 from routing import RouteService
 from store import StaleRevision
 

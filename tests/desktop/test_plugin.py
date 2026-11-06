@@ -1,7 +1,6 @@
 """Wrapper and lone-module REST tests; real core and Rust, scratch profile only."""
 import importlib.util
 import json
-import os
 from pathlib import Path
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -11,7 +10,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[2]
-ENGINE = Path(os.environ.get('ROUTING_ENGINE', str(ROOT / 'engine/target/release/solverforge-routing')))
+# Test-only contract engine over synthetic roads; the Rust solver is pinned in engine/src/solve_tests.rs.
+ENGINE = ROOT / 'tests/contract_engine.py'
 
 
 def load(name, path, package=False):
@@ -64,7 +64,7 @@ def yaml_name():
 
 def test_core_import_preserves_unrelated_plugin_modules(monkeypatch):
     import types
-    sentinels = {name: types.ModuleType(name) for name in ('providers', 'store')}
+    sentinels = {name: types.ModuleType(name) for name in ('geo', 'store')}
     for name, module in sentinels.items():
         monkeypatch.setitem(sys.modules, name, module)
     writes = []
@@ -99,17 +99,6 @@ def test_revision_errors_and_profile_isolation(tools, tmp_path, monkeypatch):
 
 
 def test_real_engine_and_stale_solution(tools, monkeypatch):
-    assert ENGINE.is_file(), 'required actual Rust engine is missing'
-    core = pkg.tools.core()
-    class Roads:
-        base_url = 'https://test.invalid'
-        def matrix(self, points): return [[0 if a==b else 5 for b in points] for a in points]
-        def route(self, points): return {'geometry':{'type':'LineString','coordinates':points},'distance_m':200,'duration_seconds':10}
-    # Fixture roads isolate network; subprocess optimization uses the actual Rust engine.
-    original = tools.factory
-    def factory():
-        service, engine = original(); service.provider = Roads(); return service, engine
-    tools.factory = factory
     tools.call('route_set_origin', {'origin':{'coordinates':[9,45]},'expected_revision':0})
     tools.call('route_add_stop', {'stop':{'coordinates':[9.01,45.01]},'expected_revision':1})
     result = tools.call('route_solve', {'expected_revision':2,'solve_seconds':1})
@@ -147,12 +136,12 @@ def test_edit_actions_and_stable_home(tools):
     assert state['endpoint'] is None
 
 
-def test_provider_engine_and_storage_errors(tools):
+def test_geocoder_engine_and_storage_errors(tools):
     tools.call('route_set_origin', {'expected_revision':0,'origin':{'coordinates':[9,45]}})
     tools.call('route_add_stop', {'expected_revision':1,'stop':{'coordinates':[9.01,45.01]}})
     core = pkg.tools.core()
     original = tools.factory
-    for exception, code in [(core.ProviderError('unreachable'), 'provider_error'), (core.EngineError('failed'), 'engine_error'), (OSError('locked'), 'storage_error')]:
+    for exception, code in [(pkg.tools.geo().ProviderError('unreachable'), 'provider_error'), (core.EngineError('failed'), 'engine_error'), (OSError('locked'), 'storage_error')]:
         def factory():
             raise exception
         tools.factory = factory
@@ -231,21 +220,18 @@ def test_search_confirmation_api_contract_and_profile_scope(tmp_path, monkeypatc
 
 
 def test_batch_plan_navigation_and_value_over_rest_with_real_engine(tmp_path, monkeypatch):
-    assert ENGINE.is_file(), 'required actual Rust engine is missing'
     api = load('routing_plan_dashboard_test', ROOT / 'dashboard/plugin_api.py')
     package = api._package()
     monkeypatch.setattr(package, 'data_dir', lambda: tmp_path / 'one')
     monkeypatch.setattr(api, '_config', lambda key, default=None: str(ENGINE) if key == 'binary' else default)
     import importlib
     geocoding = importlib.import_module('.geocoding', package.__name__)
-    providers = importlib.import_module('.providers', package.__name__)
     answers = {'Duomo': [{'label':'Duomo di Milano','coordinates':[9.1919,45.4642]}],
                'San Marco': [{'label':'San Marco, Milano','coordinates':[9.188,45.478]}, {'label':'San Marco, Venezia','coordinates':[12.34,45.43]}],
                'Castello': [{'label':'Castello Sforzesco','coordinates':[9.1795,45.4705]}]}
     monkeypatch.setattr(geocoding.NominatimGeocoder, 'search', lambda self, q, r, viewbox=None: answers[q])
     # Synthetic roads (explicit, offline): seconds proportional to longitude gap.
-    monkeypatch.setattr(providers.OSRMProvider, 'matrix', lambda self, pts: [[round(abs(a[0]-b[0])*10000) for b in pts] for a in pts])
-    monkeypatch.setattr(providers.OSRMProvider, 'route', lambda self, pts: {'geometry':{'type':'LineString','coordinates':pts},'distance_m':1000,'duration_seconds':600})
+    monkeypatch.setenv('CONTRACT_SECONDS_PER_DEGREE', '10000')
     app = FastAPI(); app.include_router(api.router)
     client = TestClient(app)
     pin = {'title':'Shared location (shared 09:12)','coordinates':[9.17,45.47]}

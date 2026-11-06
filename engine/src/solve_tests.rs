@@ -1,8 +1,5 @@
+use super::{fail, solve, Failure, Input};
 use serde_json::{json, Value};
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-};
 
 fn request(matrix: Value) -> Value {
     let n = matrix.as_array().unwrap().len();
@@ -10,37 +7,19 @@ fn request(matrix: Value) -> Value {
         "origin":0,"round_trip":false,"solve_seconds":1})
 }
 
-fn invoke(input: &Value) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_solverforge-routing"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.to_string().as_bytes())
-        .unwrap();
-    child.wait_with_output().unwrap()
+/// The solve step in-process: a matrix in, a validated order or a coded failure out.
+fn outcome(input: &Value) -> std::result::Result<Value, Failure> {
+    let input: Input =
+        serde_json::from_value(input.clone()).map_err(|e| fail("invalid_input", e.to_string()))?;
+    let (order, duration_seconds, score) = solve(input)?;
+    Ok(
+        json!({"order": order, "duration_seconds": duration_seconds, "hard_feasible": true,
+              "optimal": false, "score": score}),
+    )
 }
 
 fn success(input: &Value) -> Value {
-    let out = invoke(input);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        out.stderr.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let result: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(result["hard_feasible"], true);
-    assert_eq!(result["optimal"], false);
+    let result = outcome(input).unwrap_or_else(|e| panic!("{}: {}", e.code, e.message));
     let order = result["order"].as_array().unwrap();
     let cost: i64 = order
         .windows(2)
@@ -56,16 +35,10 @@ fn success(input: &Value) -> Value {
 }
 
 fn rejected(input: &Value, code: &str) {
-    let out = invoke(input);
-    assert!(
-        !out.status.success(),
-        "unexpected success: {}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    assert!(out.stdout.is_empty());
-    let error: Value = serde_json::from_slice(&out.stderr).expect("structured JSON stderr");
-    assert_eq!(error["code"], code);
-    assert!(error["message"].is_string());
+    match outcome(input) {
+        Ok(result) => panic!("unexpected success: {result}"),
+        Err(error) => assert_eq!(error.code, code, "{}", error.message),
+    }
 }
 
 #[test]

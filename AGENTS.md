@@ -4,7 +4,7 @@ Personal, single-vehicle multi-stop driving routes. Origin is supplied explicitl
 
 ## Architecture and invariants
 - Python plugin owns profile-isolated SQLite route state and road-provider requests. Rust SolverForge engine optimises an asymmetric matrix via JSON stdin/stdout.
-- OSRM supplies driving matrices, snaps and geometry. No straight-line fallback. Public endpoints are development defaults, not availability guarantees; disclose all network calls.
+- solverforge-maps builds the road graph from OpenStreetMap (Overpass) inside the Rust engine; the matrix and every hop's road geometry come from that one graph. No straight-line fallback and no hand-rolled routing or map drawing in this plugin: missing capabilities go upstream into solverforge-maps or solverforge-ui. Disclose all network calls.
 - Stops have stable IDs. Every edit increments route revision; an older solve cannot overwrite a newer edit. Preserve visited stops, an active next stop and explicit ordering locks. Never silently drop unreachable stops.
 - Distinguish best-found from proven optimal. A feasible score does not prove global optimality.
 - Hermes integrations use public plugin APIs only. Desktop imports only SDK/React; embed map content using the SDK sandbox. No core patches, private credential reads or automatic publication.

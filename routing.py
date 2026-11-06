@@ -1,6 +1,7 @@
 """Personal route service, independent of Hermes internals.
 
-API: RouteService(explicit_sqlite_path, provider=OSRMProvider(), engine=[...]).
+API: RouteService(explicit_sqlite_path, engine=[...]). The engine builds the road
+graph (solverforge-maps, OpenStreetMap via Overpass), the matrix and per-hop roads.
 Location arguments are {"coordinates": [longitude, latitude], "title": "..."}.
 Edits return a complete state and increment its revision. solve() performs network
 and subprocess work outside the DB transaction, then atomically publishes by CAS.
@@ -12,7 +13,6 @@ Toggling round trips does not reanchor. A configured endpoint is not a visit.
 from __future__ import annotations
 
 import json
-import math
 import os
 import shlex
 import subprocess
@@ -23,10 +23,10 @@ from typing import Any, Sequence
 from uuid import uuid4
 
 if __package__:
-    from .providers import OSRMProvider, coordinate, number, ProviderError
+    from .geo import coordinate
     from .store import RouteStore, StaleRevision
 else:
-    from providers import OSRMProvider, coordinate, number, ProviderError
+    from geo import coordinate
     from store import RouteStore, StaleRevision
 
 
@@ -84,7 +84,8 @@ class SubprocessEngine:
             for thread in threads:
                 thread.start()
             try:
-                process.wait(timeout=request["solve_seconds"] + 10)
+                # A first solve in a new area downloads its road network.
+                process.wait(timeout=request["solve_seconds"] + 600)
             except subprocess.TimeoutExpired as exc:
                 process.kill()
                 process.wait()
@@ -167,7 +168,7 @@ def compare_with_given(request: dict, given: list[int], order: list[int], solved
     return {"given_order_ids": [request["stop_ids"][i] for i in given], "given_duration_seconds": given_seconds,
             "savings_seconds": savings, "same_as_given": same, "given_respects_locks": respects,
             "message": message, "note": note,
-            "basis": "Same OSRM driving-time matrix as the optimiser (each leg rounded up to whole seconds)."}
+            "basis": "Same road-network driving-time matrix as the optimiser."}
 
 
 def repair_diff(state: dict, solution: dict) -> dict | None:
@@ -203,11 +204,11 @@ def repair_diff(state: dict, solution: dict) -> dict | None:
             "summary": " · ".join(parts) if parts else "No change from the previous route"}
 
 class RouteService:
-    def __init__(self, database_path: str | Path, *, provider=None, engine=None, max_stops: int = 80, geocoder=None):
+    def __init__(self, database_path: str | Path, *, engine=None, max_stops: int = 80, geocoder=None):
         if type(max_stops) is not int or not 1 <= max_stops <= 98:
             raise ValueError("max_stops must be 1..98")
         self.store = RouteStore(database_path)
-        self.provider = provider if provider is not None else OSRMProvider()
+        self.road_cache = Path(database_path).parent / "road-network"
         self.engine = engine
         self.max_stops = max_stops
         if __package__:
@@ -432,16 +433,9 @@ class RouteService:
                                        "same_as_given": True, "given_respects_locks": True, "message": None}}
             solution["repair"] = repair_diff(state, solution)
             return self.store.publish(revision, solution)
-        raw = self.provider.matrix(points)
-        if not isinstance(raw, list) or len(raw) != len(points) or any(not isinstance(row, list) or len(row) != len(points) for row in raw):
-            raise ProviderError("invalid provider matrix dimensions")
-        # Rust contract uses integer seconds. Round each arc UP once and verify
-        # output against this exact normalized matrix, not a rounded final sum.
-        matrix = [[math.ceil(number(cost, "matrix duration")) for cost in row] for row in raw]
-        if any(cost > (2**63 - 1) // (len(points) + 1) for row in matrix for cost in row):
-            raise ProviderError("matrix costs exceed signed 64-bit route-sum bounds")
         indices = {stop_id: i for i, stop_id in enumerate(ids)}
-        request = {"matrix": matrix, "stop_ids": ids, "origin": 0,
+        request = {"points": points, "cache_dir": str(self.road_cache), "max_snap_m": 250.0,
+                   "stop_ids": ids, "origin": 0,
                    "round_trip": close_to_start, "solve_seconds": solve_seconds,
                    "precedence": [[indices[a], indices[b]] for a, b in state["precedence"] if a in indices and b in indices]}
         if destination is not None:
@@ -452,8 +446,16 @@ class RouteService:
         if engine is None or isinstance(engine, (str, list, tuple)):
             engine = SubprocessEngine(engine)
         result = engine.solve(request)
+        matrix = result.get("matrix") if isinstance(result, dict) else None
+        if (not isinstance(matrix, list) or len(matrix) != len(points)
+                or any(not isinstance(row, list) or len(row) != len(points) for row in matrix)):
+            raise EngineError("engine returned no road matrix")
+        # Validate the order against the exact matrix the engine optimised.
+        request = {**request, "matrix": matrix}
         order = validate_result(request, result)
-        road = self.provider.route([points[i] for i in order])
+        legs = result.get("legs")
+        if not isinstance(legs, list) or len(legs) != len(order) - 1:
+            raise EngineError("engine returned no road for every hop")
         remaining = [ids[i] for i in order if i != 0 and i != destination]
         # The order the user gave: origin, unvisited stops as entered, then the
         # same terminal. Costed on the exact matrix the engine optimised.
@@ -461,8 +463,11 @@ class RouteService:
         solution = {"revision": revision, "order": state["visited"] + remaining,
                     "remaining_order": remaining, "duration_seconds": result["duration_seconds"],
                     "hard_feasible": True, "optimal": result["optimal"], "score": result["score"],
-                    "geometry": road["geometry"], "distance_m": road["distance_m"],
-                    "road_duration_seconds": road["duration_seconds"],
+                    "legs": [leg["coordinates"] for leg in legs],
+                    # Each hop starts where the previous one ended: join without repeating the seam.
+                    "geometry": {"type": "LineString", "coordinates": legs[0]["coordinates"] + [p for leg in legs[1:] for p in leg["coordinates"][1:]]},
+                    "distance_m": sum(leg["distance_m"] for leg in legs),
+                    "road_duration_seconds": sum(leg["duration_seconds"] for leg in legs),
                     "next_id": state["next_id"], "itinerary_ids": [ids[i] for i in order],
                     "labels": {stop["id"]: stop["title"] for stop in stops},
                     "comparison": compare_with_given(request, given, order, result["duration_seconds"])}

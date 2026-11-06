@@ -2,7 +2,7 @@
 
 This uses actual React, a browser SDK adapter, headless `/usr/bin/chromium`,
 the plugin's real FastAPI endpoints, SQLite/core, **real Rust** and **live public
-Nominatim + OSRM + OpenStreetMap raster tiles**. Only the SDK host/query/frame bridge is
+Nominatim, Overpass road data and OpenStreetMap raster tiles**. Only the SDK host/query/frame bridge is
 replaced. No Hermes Desktop, user profile, installation or publication is involved.
 The frame matches the public SDK's opaque-origin `sandbox="allow-scripts"` and
 `referrerPolicy="no-referrer"`. This does not prove installed Electron policy.
@@ -25,14 +25,14 @@ TMPDIR="$HOME/.hermes/cache/scratch" \
 `ROUTING_ENGINE` defaults to `engine/target/release/solverforge-routing`; a missing
 executable fails immediately. Environment cleanup prevents Hermes's Python-version
 site-packages leaking into uv. The flow starts and stops its own loopback server.
-Live OSRM/OSM refusal fails, never replaced with fake geometry or images. The flow
+Live Overpass/OSM refusal fails, never replaced with fake geometry or images. The flow
 sends only supplied public Milan landmarks, never the user's current location.
 Tile servers receive visible map areas and IP addresses as disclosed in the UI.
 
 The flow explicitly searches public Milan landmarks with region context, chooses unselected candidates, confirms origin/stops, fixes next, solves, adds Teatro alla Scala by name and repairs. `geocoding-evidence.json` preserves real queries/results and repaired state. It verifies typing does not search and selection does not write. It also verifies:
 
 - Raster street tiles actually loaded (`naturalWidth === 256`), numbered markers
-  and a nontrivial road path from the real OSRM/engine solve.
+  and a nontrivial road path from the real engine solve, one line per hop.
 - Drag panning and zoom buttons change Leaflet's actual rendered state, then
   “Fit all stops” brings the entire route and markers into the map viewport.
 - Desktop and narrow mobile layouts keep route, markers, attribution and

@@ -24,7 +24,7 @@ DEFINITIONS = {
     "mark_visited": ("Record a deliberate visit; moves current origin to that supplied stop.", {"stop_id": {"type": "string"}}),
     "set_next": ("Lock or clear the next stop.", {"stop_id": {"type": ["string", "null"]}}),
     "precedence": ("Replace ordering locks with before/after stop-ID pairs.", {"pairs": {"type": "array", "items": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2}}}),
-    "solve": ("Find a best-found driving itinerary, not proven optimal. Returns savings versus the given order (only when real), a repair diff and navigation links (Google/Apple/OSM; opening one discloses stops to that provider). Discloses exact coordinates to configured OSRM for matrix, snaps and geometry. Driving estimates only; no traffic or appointment times.", {"solve_seconds": {"type": "integer", "minimum": 1, "maximum": 120}}),
+    "solve": ("Find a best-found driving itinerary, not proven optimal. Returns savings versus the given order (only when real), a repair diff and navigation links (Google/Apple/OSM; opening one discloses stops to that provider). Routes on a local OpenStreetMap road graph; the first solve in a new area downloads that area from Overpass. Driving estimates only; no traffic or appointment times.", {"solve_seconds": {"type": "integer", "minimum": 1, "maximum": 120}}),
 }
 READ_ONLY = ("status", "current", "search_locations", "plan_places")
 REQUIRED = {"solve": ["expected_revision"], "plan_places": ["places"], "confirm_plan": ["plan_id", "expected_revision"]}

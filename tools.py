@@ -23,6 +23,10 @@ def navigation():
     return importlib.import_module('.navigation', __package__)
 
 
+def geo():
+    return importlib.import_module('.geo', __package__)
+
+
 class RoutingTools:
     def __init__(self, factory, qr=False):
         # QR SVGs are for visual surfaces (REST); tool results carry links only.
@@ -70,12 +74,12 @@ class RoutingTools:
                     "freshness": "current" if solved == state["revision"] else "pending",
                     "engine": {"available": available, "path": str(engine)},
                     "geocoder": {"url": service.locations.geocoder.url},
-                    "provider": {"name": "OSRM", "url": service.provider.base_url,
-                                 "disclosure": "Solve sends exact coordinates to this server. No live traffic."},
+                    "roads": {"source": "OpenStreetMap via Overpass, routed locally by solverforge-maps",
+                              "disclosure": "The first solve in a new area downloads its road network (a bounding box, not your stops). No live traffic."},
                     "estimate": "Estimated driving only", "quality": "best-found, not proven optimal"}
         except core().StaleRevision as exc:
             return self.fail("stale_revision", str(exc))
-        except core().ProviderError as exc:
+        except geo().ProviderError as exc:
             return self.fail("provider_error", str(exc))
         except core().EngineError as exc:
             return self.fail("engine_error", str(exc))

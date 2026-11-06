@@ -1,15 +1,13 @@
-"""Headless Chromium + real REST/core/Rust/live OSRM, never the user's Desktop.
+"""Headless Chromium + real REST/core/Rust on live OpenStreetMap roads, never the user's Desktop.
 
 Build bundle with the README command, then uv run with playwright/fastapi/uvicorn.
 Artifacts and SQLite live only in a newly created scratch directory.
 """
 import importlib.util
 import json
-import re
 import os
 from pathlib import Path
 import socket
-import sys
 import tempfile
 import threading
 import time
@@ -30,7 +28,7 @@ spec.loader.exec_module(api)
 package = api._package()
 package.data_dir = lambda: ARTIFACTS / 'profile'
 api._config = lambda key, default=None: str(ENGINE) if key == 'binary' else default
-providers = importlib.import_module('.providers', package.__name__)
+geo = importlib.import_module('.geo', package.__name__)
 DARSENA = [9.1772, 45.4525]  # Darsena basin, Milano (public landmark coordinates)
 app = FastAPI()
 app.include_router(api.router, prefix='/api')
@@ -134,23 +132,13 @@ try:
         assert result['state']['solution']['geometry']['coordinates']
         expect(page.get_by_role('heading', name='Navigate', exact=True)).to_be_visible()
         frame = page.frame_locator('iframe')
-        # Legs come from the payload; the first solve here is what it is (open or return).
-        doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
-        doclegs = re.findall(r'geo:\d+_\d+', doc)
-        # The pane polls every 4 s; wait until its iframe carries this document.
-        for _ in range(10):
-            if page.locator('iframe').count():
-                guest_legs = frame.locator('body').evaluate("() => (JSON.parse(document.getElementById('route-data').textContent).legs || []).join(',')")
-                if (guest_legs or '').split('geo:') == doclegs:
-                    break
+        # One drawn line per hop, exactly the engine's legs.
+        legs = result['state']['solution']['legs']
+        for _ in range(10):  # the pane polls every 4 s; wait for this document
+            if page.locator('iframe').count() and frame.locator('.leaflet-overlay-pane path').count() == len(legs):
+                break
             page.wait_for_timeout(800)
-        assert ','.join(doclegs) in (guest_legs or ''), (guest_legs, doclegs)
-        leg_paths = frame.locator('.leaflet-overlay-pane path')
-        # Each road lane: a white casing and the coloured line; directions are road
-        # markers whose inline SVG chevron is centred on the lane.
-        assert leg_paths.count() == 2 * len(doclegs), (leg_paths.count(), len(doclegs), errors)
-        arrows = frame.locator('.route-arrow')
-        assert arrows.count() >= len(doclegs) - 1, (arrows.count(), doclegs)
+        assert frame.locator('.leaflet-overlay-pane path').count() == len(legs), (len(legs), errors)
         expect(frame.locator('.sf-marker-stop')).to_have_count(3)
         assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'map or attribution clipped'
         assert 'OpenStreetMap contributors' in frame.locator('.leaflet-control-attribution').inner_text(), errors
@@ -358,7 +346,7 @@ try:
         assert all(i['cached'] for i in plan['items'] if i['role'] == 'stop' and i['query'] != 'Milano Porta Garibaldi')
         assert current()['revision'] == 0 and current()['pending_plan']['plan_id'] == plan['plan_id']
         expected = {  # deliberate choices: query -> (accept candidate, why)
-            'Darsena Milano': (lambda c: c['locality'] == 'Milano' and providers.distance_m(c['coordinates'], DARSENA) < 300, 'at the Darsena basin'),
+            'Darsena Milano': (lambda c: c['locality'] == 'Milano' and geo.distance_m(c['coordinates'], DARSENA) < 300, 'at the Darsena basin'),
             # OSM tags the arch as a building or an attraction over time; never a tram stop or platform.
             'Arco della Pace': (lambda c: c['label'].startswith('Arco della Pace') and c['kind'] not in ('transit stop', 'platform'), 'the arch itself'),
             "Basilica di Sant'Eustorgio": (lambda c: c['label'].startswith("Basilica di Sant'Eustorgio"), 'the basilica'),
@@ -404,15 +392,10 @@ try:
         comparison = batch_solved['state']['solution']['comparison']
         solution = batch_solved['state']['solution']
         # Recomputed claim on deliberately chosen, nearby places only.
-        assert all(providers.distance_m(s['coordinates'], pin['coordinates']) < 15000 for s in batch_solved['state']['stops'])
+        assert all(geo.distance_m(s['coordinates'], pin['coordinates']) < 15000 for s in batch_solved['state']['stops'])
         assert comparison['savings_seconds'] == comparison['given_duration_seconds'] - solution['duration_seconds'], comparison
-        doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
-        doclegs = re.findall(r'geo:\d+_\d+', doc)
-        assert len(doclegs) >= 4, doclegs  # round trip: origin, stops, return home
-        # Round trip: casing + line per hop, chevron markers on every lane.
-        got_paths = frame.locator('.leaflet-overlay-pane path').count()
-        assert got_paths == 2 * len(doclegs), (got_paths, len(doclegs), doclegs)
-        assert frame.locator('.route-arrow').count() >= len(doclegs) - 1
+        assert len(solution['legs']) >= 4, solution['legs']  # round trip: origin, stops, return home
+        assert frame.locator('.leaflet-overlay-pane path').count() == len(solution['legs'])
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
             expect(page.get_by_text(comparison['message'], exact=True)).to_be_visible()
@@ -420,50 +403,6 @@ try:
                              'navigation': batch_solved['navigation']}
         shot('batch-solved.png')
 
-        # Two-way round trip over one road: the return leg must draw as its own
-        # right-hand lane next to the outgoing one, chevrons each way.
-        package.data_dir = lambda: ARTIFACTS / 'profile-twoway'
-        page.set_viewport_size({'width': 1100, 'height': 900})
-        two = {}
-        two['origin'] = {'title': 'Largo Augusto', 'coordinates': [9.1983, 45.4647]}
-        two['stop'] = {'title': 'Arco della Pace', 'coordinates': [9.1742, 45.4742]}
-        r = post('set_origin', origin=two['origin'], expected_revision=0).json()
-        assert r['ok'], r
-        r = post('add_stop', stop=two['stop'], expected_revision=1).json()
-        assert r['ok'], r
-        r = post('set_round_trip', enabled=True, expected_revision=2).json()
-        assert r['ok'], r
-        two['solved'] = act(page.get_by_role('button', name='Plan route', exact=True))
-        two['legs'] = len(re.findall(r'geo:\\d+_\\d+', two['solved']['navigation']['google']['legs'][0]['url']))
-        refresh(two['solved']['revision'])
-        for _ in range(12):   # the pane polls; the map document follows the committed solve
-            doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
-            two['doclegs'] = re.findall(r'geo:\d+_\d+', doc)
-            if two['doclegs']:
-                break
-            page.wait_for_timeout(700)
-        assert len(two['doclegs']) == 2, (two['doclegs'], two['solved']['state'].get('round_trip'), two['solved']['state']['stops'])
-        assert frame.locator('.leaflet-overlay-pane path').count() == 4, 'casing + line per lane'
-        centres = frame.locator('.leaflet-overlay-pane path').evaluate_all(
-            "(paths) => paths.map(p => { const b = p.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2] })")
-        two['laneCentres'] = centres
-        out_x = sorted(centres, key=lambda c: c[0])[0]
-        back_x = sorted(centres, key=lambda c: c[0])[-1]
-        assert abs(out_x[0] - back_x[0]) > 3, (out_x, back_x)  # the lanes really sit side by side
-        arrows = frame.locator('.route-arrow')
-        assert arrows.count() >= 4, arrows.count()  # both directions get their paint
-        frame.get_by_role('button', name='Zoom in', exact=True).click()
-        page.wait_for_timeout(1500)   # zoomend repaints the lane paint
-        shot('two-way-zoomed.png')
-        # The two lanes carry opposite headings: collect every chevron's rotation.
-        angles = frame.locator('.route-arrow svg path').evaluate_all(
-            "(paths) => paths.map(p => { const m = /rotate\\(([-0-9.]+)deg\\)/.exec(p.getAttribute('style')); return m ? Number(m[1]) : null })")
-        assert len(angles) == arrows.count() and None not in angles, angles
-        assert max(angles) - min(angles) > 60 and any(a > 20 for a in angles) and any(a < -20 for a in angles), angles  # both ways painted
-        two['chevronAngles'] = angles
-        page.wait_for_timeout(600)
-        shot('two-way-lanes.png')
-        evidence['two_way'] = {k: v for k, v in two.items() if k != 'colorPaths'}
         page.get_by_role('heading', name='Navigate', exact=True).locator('..').screenshot(path=str(ARTIFACTS / 'batch-handoff.png'))
         screenshots.append(str(ARTIFACTS / 'batch-handoff.png'))
         assert not errors, errors

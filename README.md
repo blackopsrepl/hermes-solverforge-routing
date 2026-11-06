@@ -1,8 +1,8 @@
 # SolverForge Routing for Hermes
 
-Personal, single-vehicle multi-stop driving itineraries. Supply a starting point and stops; SolverForge searches for a shorter driving route using road travel times from OSRM. Add or skip stops, lock the next visit, and repair what remains without rewriting visited history.
+Personal, single-vehicle multi-stop driving itineraries. Supply a starting point and stops; SolverForge searches for a shorter driving route using road travel times from [solverforge-maps](https://github.com/SolverForge/solverforge-maps), routed locally on OpenStreetMap roads. Add or skip stops, lock the next visit, and repair what remains without rewriting visited history.
 
-**Development status:** the Rust optimiser and persistent route service have been exercised together against real OSRM data. Hermes tools and a Desktop surface are implemented and undergoing integration verification. This is not a published or install-ready release.
+**Development status:** the Rust engine routes on a real OpenStreetMap road graph through solverforge-maps and optimises the visit order with SolverForge. Hermes tools and a Desktop surface are implemented and undergoing integration verification. This is not a published or install-ready release.
 
 ## What works in the first slice
 
@@ -10,7 +10,8 @@ Personal, single-vehicle multi-stop driving itineraries. Supply a starting point
 - Asymmetric driving costs: going from A to B need not cost the same as B to A.
 - Persistent stops with stable IDs, visited history, a fixed next stop and precedence locks.
 - Revision-checked editing and publication: an older solve cannot overwrite a newer change.
-- Road geometry returned by OSRM; no straight-line fallback and no silently dropped stops.
+- One road line per hop, from the same road graph as the travel times; no straight-line fallback and no silently dropped stops.
+- Roads respect one-way streets, roundabouts, motorway direction and roads closed to cars. Turn restrictions are not modelled yet.
 - Fifteen native Hermes tools, a `::route{}` chat card in the conversation, and a
   route map pane docked beside the chat (status-bar chip, palette command, automatic
   open on the first chat edit).
@@ -67,7 +68,7 @@ choices and a single “Add N places” action.
 ## After solving: value and navigation handoff
 
 - **Savings**: the order you gave (origin, stops as entered, same end) is costed on
-  the same OSRM matrix the optimiser used. “N min shorter than the order you gave” is
+  the same road matrix the optimiser used. “N min shorter than the order you gave” is
   shown only when the result differs, your order respects the fixed-next/order locks,
   and the saving is at least one whole minute (rounded down). Otherwise no claim.
 - **Repair diff**: after editing and solving again, the result lists added, removed
@@ -82,7 +83,7 @@ choices and a single “Add N places” action.
   - Apple Maps unified URLs (`maps.apple.com/directions?source=…&waypoint=…&mode=driving`,
     iOS 18.4 / macOS 15.4 or later). Apple documents no waypoint limit; the same
     nine-waypoint legs are used.
-  - openstreetmap.org directions take exactly two points, so one OSRM-car link per leg.
+  - openstreetmap.org directions take exactly two points, so one link per leg.
 - Desktop shows them as plain links. Electron denies new-window requests, and a
   main-frame link navigation is cancelled and handed to Hermes’s audited external
   opener (http/https allow-list), so links open in the system browser or provider app;
@@ -113,7 +114,7 @@ The score certifies model feasibility, not global optimality. Results are **best
 
 ## Network, privacy and operational disclosure
 
-Solving sends exact supplied coordinates to `https://router.project-osrm.org` for a driving-time matrix and route geometry. That public service is a development dependency with no availability guarantee. Road data may be outdated or incomplete; results are not live traffic or turn-by-turn navigation. Road data © OpenStreetMap contributors; routing by OSRM.
+Solving routes locally: your stops never leave the machine. The first solve in a new area downloads that area's roads from the public Overpass API (`https://overpass-api.de`), which learns a bounding box around the route, not the stops. That download can take a minute or two for a city-to-city route; later solves in the same area read the cached road network from the profile's plugin data. Overpass is a public service with no availability guarantee. Road data may be outdated or incomplete; results are not live traffic or turn-by-turn navigation. Road data © OpenStreetMap contributors.
 
 Viewing the map loads raster tiles directly from `https://a.tile.openstreetmap.org`, `https://b.tile.openstreetmap.org` and `https://c.tile.openstreetmap.org`. Viewing, panning and zooming disclose the visible area and your IP to those servers. This happens independently of solving. Tiles need network access; no offline basemap or availability guarantee is provided. Pan/zoom is local guest interaction, not location tracking or route editing.
 
@@ -183,7 +184,7 @@ Provider errors are reported, not silently retried. Solving and map tiles have t
 separate coordinate/visible-area disclosures above. No credentials are needed.
 
 The opt-in browser test is also the real geocoding live test: it searches public
-Milan landmarks on demand, confirms choices, solves through OSRM + Rust, adds
+Milan landmarks on demand, confirms choices, solves through the Rust engine on live OpenStreetMap roads, adds
 Teatro alla Scala by name and repairs. `geocoding-evidence.json` records exact real
 queries/candidates and the repaired solution. No fake geocoder is used there;
 offline tests label their synthetic provider and exercise real SQLite, expiry,
@@ -196,12 +197,10 @@ Rust 1.95+, Python 3.12, uv, Node/npm and Hermes are needed for the complete gat
 ```sh
 make engine
 make check
-# Opt-in: disclose the documented public Milan fixture coordinates to OSRM
-make live
 ```
 
-Set `CARGO_TARGET_DIR` to move build artifacts outside the checkout. Set `ROUTING_ENGINE` to use an existing real engine in integration tests. `make live` writes evidence to `$TMPDIR`, not the repository. No test-only solver is used by that target.
+Set `CARGO_TARGET_DIR` to move build artifacts outside the checkout. The SolverForge solver is pinned by in-process tests in `engine/src/solve_tests.rs`; offline Python tests use `tests/contract_engine.py`, a labelled test-only engine on synthetic roads. Set `ROUTING_ENGINE` to point the browser flow at a built engine.
 
-The opt-in isolated browser flow in `tests/browser/README.md` has exercised actual Chromium, FastAPI, SQLite/core, the real Rust engine and live OSRM/OSM tiles: rendered raster tiles, numbered stops and road geometry, drag/zoom/fit, unclipped desktop/mobile layout, tile-image failure, and stale-write refusal. It writes screenshots and a receipt to scratch. It does **not** prove the installed Electron SDK policy or remote-gateway integration; those remain separate acceptance checks. Restart Desktop after updating the unified plugin so its backend and Desktop module are both current.
+The opt-in isolated browser flow in `tests/browser/README.md` has exercised actual Chromium, FastAPI, SQLite/core, the real Rust engine on live OpenStreetMap roads, and OSM tiles: rendered raster tiles, numbered stops and road geometry, drag/zoom/fit, unclipped desktop/mobile layout, tile-image failure, and stale-write refusal. It writes screenshots and a receipt to scratch. It does **not** prove the installed Electron SDK policy or remote-gateway integration; those remain separate acceptance checks. Restart Desktop after updating the unified plugin so its backend and Desktop module are both current.
 
 There is no engine release installer yet. For isolated development, configure the plugin's `binary` setting with the built executable's absolute path. No user-profile installation or publication is implied by a successful local test.

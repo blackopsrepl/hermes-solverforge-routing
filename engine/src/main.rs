@@ -2,12 +2,35 @@ mod domain;
 
 use serde::{Deserialize, Serialize};
 use solverforge::{prelude::HardSoftScore, SolverEvent, SolverManager};
+use solverforge_maps::{
+    BoundingBox, Coord, NetworkConfig, NetworkRef, RoadNetwork, SnappedCoord, UNREACHABLE,
+};
 use std::{
     collections::HashSet,
     io::{self, Read},
     sync::Arc,
 };
 
+/// What the plugin sends: places as [longitude, latitude], never a matrix.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Request {
+    points: Vec<[f64; 2]>,
+    cache_dir: String,
+    max_snap_m: f64,
+    stop_ids: Vec<String>,
+    origin: usize,
+    #[serde(default)]
+    destination: Option<usize>,
+    round_trip: bool,
+    #[serde(default)]
+    fixed_first: Option<usize>,
+    #[serde(default)]
+    precedence: Vec<[usize; 2]>,
+    solve_seconds: u64,
+}
+
+/// The solver's problem: the request with its road matrix in place of the points.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
 #[serde(deny_unknown_fields)]
 struct Input {
@@ -187,20 +210,94 @@ impl Problem {
 }
 
 #[derive(Serialize)]
+struct Leg {
+    /// [longitude, latitude] along the road graph, start to end of this hop.
+    coordinates: Vec<[f64; 2]>,
+    duration_seconds: i64,
+    distance_m: f64,
+}
+
+#[derive(Serialize)]
 struct Output {
     order: Vec<usize>,
     duration_seconds: i64,
     hard_feasible: bool,
     optimal: bool,
     score: String,
+    matrix: Vec<Vec<Option<i64>>>,
+    legs: Vec<Leg>,
 }
 
-fn run() -> Result<Output> {
-    let mut text = String::new();
-    io::stdin()
-        .read_to_string(&mut text)
-        .map_err(|e| fail("input_error", e.to_string()))?;
-    let input = serde_json::from_str(&text).map_err(|e| fail("invalid_input", e.to_string()))?;
+/// One road graph for the matrix and every hop: costs and drawn roads agree.
+struct Roads {
+    network: NetworkRef,
+    snaps: Vec<SnappedCoord>,
+    matrix: Vec<Vec<Option<i64>>>,
+}
+
+fn load_roads(runtime: &tokio::runtime::Runtime, request: &Request) -> Result<Roads> {
+    let coords = request
+        .points
+        .iter()
+        .map(|&[lng, lat]| Coord::try_new(lat, lng))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| fail("invalid_input", e.to_string()))?;
+    if coords.is_empty() {
+        return Err(fail("invalid_input", "points must be nonempty"));
+    }
+    let bbox = BoundingBox::from_coords(&coords).expand_for_routing(&coords);
+    let config = NetworkConfig::default().cache_dir(&request.cache_dir);
+    let network = runtime
+        .block_on(RoadNetwork::load_or_fetch(&bbox, &config, None))
+        .map_err(|e| fail("road_network", e.to_string()))?;
+    let table = runtime.block_on(network.compute_matrix(&coords, None));
+    let snaps = table.locations().to_vec();
+    if let Some(far) = snaps
+        .iter()
+        .position(|s| !s.snap_distance_m.is_finite() || s.snap_distance_m > request.max_snap_m)
+    {
+        return Err(fail(
+            "snap_too_far",
+            format!(
+                "point {far} is farther than {} m from a drivable road",
+                request.max_snap_m
+            ),
+        ));
+    }
+    let n = coords.len();
+    let matrix = (0..n)
+        .map(|i| {
+            (0..n)
+                .map(|j| table.get(i, j).filter(|&c| c != UNREACHABLE))
+                .collect()
+        })
+        .collect();
+    Ok(Roads {
+        network,
+        snaps,
+        matrix,
+    })
+}
+
+fn legs(roads: &Roads, order: &[usize]) -> Result<Vec<Leg>> {
+    order
+        .windows(2)
+        .map(|hop| {
+            let route = roads
+                .network
+                .route_snapped(&roads.snaps[hop[0]], &roads.snaps[hop[1]])
+                .map_err(|e| fail("road_network", e.to_string()))?;
+            Ok(Leg {
+                coordinates: route.geometry.iter().map(|c| [c.lng, c.lat]).collect(),
+                duration_seconds: route.duration_seconds,
+                distance_m: route.distance_meters,
+            })
+        })
+        .collect()
+}
+
+/// Best-found order over a road matrix, independently validated.
+fn solve(input: Input) -> Result<(Vec<usize>, i64, String)> {
     let p = Arc::new(Problem::new(input)?);
     let plan = domain::Plan {
         routes: vec![domain::Route {
@@ -242,12 +339,40 @@ fn run() -> Result<Output> {
             "incremental score, full score and independently computed duration disagree",
         ));
     }
+    Ok((order, duration_seconds, expected.to_string()))
+}
+
+fn run() -> Result<Output> {
+    let mut text = String::new();
+    io::stdin()
+        .read_to_string(&mut text)
+        .map_err(|e| fail("input_error", e.to_string()))?;
+    let request: Request =
+        serde_json::from_str(&text).map_err(|e| fail("invalid_input", e.to_string()))?;
+    if request.stop_ids.len() != request.points.len() {
+        return Err(fail("invalid_input", "points must match stop_ids"));
+    }
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| fail("input_error", e.to_string()))?;
+    let roads = load_roads(&runtime, &request)?;
+    let (order, duration_seconds, score) = solve(Input {
+        matrix: roads.matrix.clone(),
+        stop_ids: request.stop_ids,
+        origin: request.origin,
+        destination: request.destination,
+        round_trip: request.round_trip,
+        fixed_first: request.fixed_first,
+        precedence: request.precedence,
+        solve_seconds: request.solve_seconds,
+    })?;
+    let legs = legs(&roads, &order)?;
     Ok(Output {
         order,
         duration_seconds,
         hard_feasible: true,
         optimal: false,
-        score: expected.to_string(),
+        score,
+        matrix: roads.matrix,
+        legs,
     })
 }
 
@@ -270,3 +395,7 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "solve_tests.rs"]
+mod tests;

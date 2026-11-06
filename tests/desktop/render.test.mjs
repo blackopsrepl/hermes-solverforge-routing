@@ -11,7 +11,7 @@ let contributions
 plugin.register({rest:()=>{throw Error('SSR must not call backend')},registerMany:items=>{contributions=items;return ()=>{}}})
 const stop={id:'one',title:'Library',coordinates:[9.01,45.01],visited:false}
 const home={title:'Home & <safe>',coordinates:[9,45]}
-function data(solution=null){return {ok:true,map_document:'<!doctype html><p>Scoped map document</p>',revision:3,solved_revision:solution?3:null,engine:{available:true},provider:{url:'https://router.project-osrm.org'},state:{revision:3,solved_revision:solution?3:null,origin:{title:'Current supplied origin',coordinates:[9.02,45.02]},return_origin:home,endpoint:null,round_trip:true,stops:[stop],visited:[],next_id:null,precedence:[],solution}}}
+function data(solution=null){return {ok:true,map_document:'<!doctype html><p>Scoped map document</p>',revision:3,solved_revision:solution?3:null,engine:{available:true},state:{revision:3,solved_revision:solution?3:null,origin:{title:'Current supplied origin',coordinates:[9.02,45.02]},return_origin:home,endpoint:null,round_trip:true,stops:[stop],visited:[],next_id:null,precedence:[],solution}}}
 const solution={revision:3,remaining_order:['one'],itinerary_ids:['origin','one','return'],road_duration_seconds:120,distance_m:1200,geometry:{coordinates:[[9.02,45.02],[9.01,45.01],[9,45]]}}
 // The Route view lives in a pane docked beside the chat, opened from the palette.
 function renderPage(value){setFixture(value);if(!panes.length)contributions.find(c=>c.area==='palette').data.run();return renderToStaticMarkup(panes[0].render())}

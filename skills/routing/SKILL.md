@@ -70,8 +70,9 @@ origin moves, stable return-home does not.
 
 ## After solving
 
-Locations, searches and plans persist in the active profile. route_solve discloses
-exact coordinates to configured OSRM. Report:
+Locations, searches and plans persist in the active profile. route_solve routes
+locally; the first solve in a new area downloads that area's roads from Overpass
+(a bounding box, not the stops) and can take a minute or two. Report:
 - solution.comparison.message when present ("N min shorter than the order you
   gave"). It is set only when real: same matrix, your order allowed by the locks,
   at least one whole minute. Never invent or round up savings; otherwise say

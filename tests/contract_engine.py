@@ -1,9 +1,22 @@
-"""Test-only exact solver, not a substitute for the Rust engine/live evidence."""
+#!/usr/bin/env python3
+"""Test-only exact solver over SYNTHETIC roads, not a substitute for the Rust engine.
+
+Speaks the engine's JSON contract: points in; order, matrix and per-hop legs out.
+Its roads are straight lines with deterministic made-up costs.
+"""
 import itertools
 import json
+import os
 import sys
 
 request = json.load(sys.stdin)
+points = request["points"]
+line = os.environ.get("CONTRACT_SECONDS_PER_DEGREE")
+if line:
+    # Places on a line: driving time proportional to the longitude gap.
+    request["matrix"] = [[round(abs(a[0] - b[0]) * float(line)) for b in points] for a in points]
+else:
+    request["matrix"] = [[0 if i == j else (i * 13 + j * 7) % 37 + 2 for j in range(len(points))] for i in range(len(points))]
 origin = request["origin"]
 end = request.get("destination")
 remaining = [i for i in range(len(request["matrix"])) if i not in (origin, end)]
@@ -27,5 +40,8 @@ for perm in itertools.permutations(remaining):
 if best is None:
     print(json.dumps({"hard_feasible": False}))
 else:
-    print(json.dumps({"order": best[1], "duration_seconds": best[0], "hard_feasible": True,
-                      "optimal": True, "score": f"0hard/-{best[0]}soft"}))
+    order = best[1]
+    legs = [{"coordinates": [points[a], points[b]], "duration_seconds": request["matrix"][a][b], "distance_m": 100.0}
+            for a, b in zip(order, order[1:])]
+    print(json.dumps({"order": order, "duration_seconds": best[0], "hard_feasible": True, "optimal": True,
+                      "score": f"0hard/-{best[0]}soft", "matrix": request["matrix"], "legs": legs}))

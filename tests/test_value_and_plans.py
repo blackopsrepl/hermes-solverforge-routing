@@ -1,9 +1,9 @@
-"""Savings, repair diffs and atomic batch plans on real SQLite and the real Rust engine.
+"""Savings, repair diffs and atomic batch plans on real SQLite.
 
-Roads come from an explicitly synthetic provider (exact, known durations) so the
-expected savings are computable by hand; optimisation runs in the actual engine.
+The test-only contract engine runs on synthetic line roads (exact, known
+durations) so the expected savings are computable by hand. The Rust solver's own
+behaviour is pinned in engine/src/solve_tests.rs.
 """
-import os
 from pathlib import Path
 import sys
 
@@ -11,20 +11,17 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from routing import RouteService, SubprocessEngine  # noqa: E402
+from routing import RouteService  # noqa: E402
 from store import StaleRevision  # noqa: E402
 import planning  # noqa: E402
 
-ENGINE = os.environ.get("ROUTING_ENGINE", str(ROOT / "engine/target/release/solverforge-routing"))
+ENGINE = [sys.executable, str(ROOT / "tests/contract_engine.py")]
 
 
-class LineRoads:
-    """Synthetic: places on a line; driving time = 60 s per 0.01° of longitude."""
-    base_url = "https://synthetic.invalid"
-    def matrix(self, points):
-        return [[round(abs(a[0] - b[0]) * 6000) for b in points] for a in points]
-    def route(self, points):
-        return {"geometry": {"type": "LineString", "coordinates": points}, "duration_seconds": 1, "distance_m": 1}
+@pytest.fixture(autouse=True)
+def line_roads(monkeypatch):
+    # Synthetic line roads: driving time = 60 s per 0.01° of longitude.
+    monkeypatch.setenv("CONTRACT_SECONDS_PER_DEGREE", "6000")
 
 
 class Geocoder:
@@ -51,8 +48,7 @@ def place(x, title):
 
 @pytest.fixture
 def service(tmp_path):
-    assert Path(ENGINE).is_file(), "required real Rust engine missing"
-    return RouteService(tmp_path / "route.db", provider=LineRoads(), engine=SubprocessEngine([ENGINE]), geocoder=Geocoder())
+    return RouteService(tmp_path / "route.db", engine=ENGINE, geocoder=Geocoder())
 
 
 def build(service, xs):
@@ -81,7 +77,7 @@ def test_no_savings_claim_when_order_already_best_or_locked_or_tiny(service, tmp
     comparison = service.solve(solve_seconds=1, expected_revision=state["revision"])["solution"]["comparison"]
     assert comparison["same_as_given"] and comparison["message"] is None and comparison["savings_seconds"] == 0
     # Given order violates a lock: never claim savings against an order that is not allowed.
-    other = RouteService(tmp_path / "locked.db", provider=LineRoads(), engine=SubprocessEngine([ENGINE]))
+    other = RouteService(tmp_path / "locked.db", engine=ENGINE)
     state = build(other, [3, 1, 2])
     ids = [s["id"] for s in state["stops"]]
     state = other.set_precedence([[ids[1], ids[0]], [ids[2], ids[0]]], expected_revision=state["revision"])
@@ -89,7 +85,7 @@ def test_no_savings_claim_when_order_already_best_or_locked_or_tiny(service, tmp
     comparison = other.solve(solve_seconds=1, expected_revision=state["revision"])["solution"]["comparison"]
     assert not comparison["given_respects_locks"] and comparison["message"] is None
     # Sub-minute difference: no minutes claimed.
-    tiny = RouteService(tmp_path / "tiny.db", provider=LineRoads(), engine=SubprocessEngine([ENGINE]))
+    tiny = RouteService(tmp_path / "tiny.db", engine=ENGINE)
     state = build(tiny, [0.5, 0.25])
     comparison = tiny.solve(solve_seconds=1, expected_revision=state["revision"])["solution"]["comparison"]
     assert 0 < comparison["savings_seconds"] < 60 and comparison["message"] is None

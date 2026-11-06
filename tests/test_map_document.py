@@ -13,7 +13,7 @@ spec.loader.exec_module(module)
 
 
 def state():
-    return {'revision': 3, 'origin': {'title': '</script><script>alert(1)</script>', 'coordinates': [9, 45]}, 'return_origin': {'title': 'Home', 'coordinates': [9, 45]}, 'stops': [{'id': 's', 'title': 'Stop', 'coordinates': [9.1, 45.1], 'visited': False}], 'endpoint': None, 'round_trip': True, 'solution': {'revision': 3, 'itinerary_ids': ['origin', 's', 'return'], 'geometry': {'coordinates': [[9, 45], [9.1, 45.1], [9, 45]]}}}
+    return {'revision': 3, 'origin': {'title': '</script><script>alert(1)</script>', 'coordinates': [9, 45]}, 'return_origin': {'title': 'Home', 'coordinates': [9, 45]}, 'stops': [{'id': 's', 'title': 'Stop', 'coordinates': [9.1, 45.1], 'visited': False}], 'endpoint': None, 'round_trip': True, 'solution': {'revision': 3, 'itinerary_ids': ['origin', 's', 'return'], 'legs': [[[9, 45], [9.1, 45.1]], [[9.1, 45.1], [9, 45]]], 'geometry': {'coordinates': [[9, 45], [9.1, 45.1], [9, 45]]}}}
 
 
 def payload(document):
@@ -30,10 +30,8 @@ def test_guest_security_and_safe_titles():
     assert '</script><script>alert(1)' not in doc
     assert payload(doc)['markers'][0]['title'] == '</script><script>alert(1)</script>'
     assert [p['number'] for p in payload(doc)['markers']] == [0, 1, 2]
-    # Round-trip splits: one leg per hop, last hop back to the start.
-    legs = payload(doc)['legs']
-    assert legs == ['geo:0_1', 'geo:1_2'], legs  # origin→stop, stop→start
-    assert payload(doc) == {**payload(doc), 'legs': legs}
+    # The engine's hops pass through unchanged: origin→stop, stop→start.
+    assert payload(doc)['legs'] == [[[9, 45], [9.1, 45.1]], [[9.1, 45.1], [9, 45]]]
     # Fit lives in the guest JS (a Leaflet control), not in the server document.
     assert 'fit-control' in doc
 

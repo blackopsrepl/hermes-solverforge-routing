@@ -8,10 +8,10 @@ ROUTING_ENGINE ?= $(CARGO_TARGET_DIR)/release/solverforge-routing
 export ROUTING_ENGINE
 PYTEST := uv run --no-project --python 3.12 --with pytest --with fastapi --with httpx --with pyyaml --with opencv-python-headless --with numpy pytest --import-mode=importlib
 
-.PHONY: help engine test test-engine test-plugin test-desktop lint validate check live
+.PHONY: help engine test test-engine test-plugin test-desktop lint validate check
 help:
 	@printf '\033[32mSolverForge Routing\033[0m · personal road itineraries\n\n'
-	@printf '  make engine        Build the Rust route optimiser\n  make check         Format, lint, engine, plugin, Desktop and catalog gates\n  make live          Real OSRM + Rust route, then add a stop and repair\n\n'
+	@printf '  make engine        Build the Rust route optimiser\n  make check         Format, lint, engine, plugin, Desktop and catalog gates\n\n'
 	@printf 'CARGO_TARGET_DIR and ROUTING_ENGINE can point outside this checkout.\n'
 engine:
 	$(CARGO) build --manifest-path "$(ROOT)engine/Cargo.toml" --release --locked
@@ -31,6 +31,3 @@ validate:
 	hermes plugins doctor "$(ROOT)" --ci
 check: lint test validate
 	@printf '\033[32m✓ All checks passed\033[0m\n'
-live: engine
-	@test -n "$$TMPDIR" || { printf 'Set TMPDIR to your scratch directory\n'; exit 1; }
-	cd "$(ROOT)" && python3 tests/live_smoke.py --engine "$(ROUTING_ENGINE)" --evidence "$$TMPDIR/routing-live-evidence.json"

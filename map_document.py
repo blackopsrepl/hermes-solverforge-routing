@@ -1,6 +1,5 @@
 """Self-contained opaque-origin map guest. No executable network dependencies."""
 import json
-import math
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -19,39 +18,6 @@ def _template() -> str:
 <body><div id="map" aria-label="Interactive street map with road route and numbered stops"></div>
 <p id="tiles" role="status"></p>
 <script>""" + asset("leaflet.js") + "\n</script><script>var SF = {};\n" + asset("sf-map.js") + "\n</script><script id=\"route-data\" type=\"application/json\">__ROUTE_DATA__</script><script>" + asset("guest.js") + "\n</script></body></html>"
-
-
-def _leg_splits(itinerary: list, points: list, places: dict) -> list:
-    """Geometry indices where each itinerary place sits, in travel order.
-
-    The first and last cuts are the geometry ends. One leg per travel hop, even
-    when the road between the last stop and the start is very short: the last
-    cut joins the previous one only if nothing separates them.
-    """
-    if not itinerary:
-        return []
-    cuts, cursor = [0], 0
-    last = len(points) - 1
-    for key in itinerary[1:]:
-        place = places.get(key)
-        if not place:
-            continue
-        target = place["coordinates"]
-        best, best_d = cursor, None
-        for i in range(cursor + 1, last + 1):
-            dx = (points[i][0] - target[0]) * max(math.cos(math.radians(target[1])), 0.05)
-            dy = points[i][1] - target[1]
-            d = dx * dx + dy * dy
-            if best_d is None or d < best_d:
-                best, best_d = i, d
-        if best > cursor:
-            cuts.append(best)
-            cursor = best
-    if cuts[-1] < last:
-        cuts.append(last)
-    if cuts[-1] == cuts[-2]:            # degenerate short final hop shares a point
-        cuts.pop()
-    return [f"geo:{a}_{b}" for a, b in zip(cuts, cuts[1:])]
 
 
 def _short(title):
@@ -80,7 +46,7 @@ def map_document(state: dict) -> str:
             ids.append(endpoint["id"])
     markers = [{"number": i, "title": _short(places[key].get("title")) or ("Start" if key == "origin" else "Home" if key == "return" else "Stop"), "coordinates": places[key]["coordinates"]} for i, key in enumerate(ids) if places.get(key)]
     geometry = (solution.get("geometry") or {}).get("coordinates", []) if solution else []
-    legs = _leg_splits(ids, geometry, places) if solution and len(geometry) > 1 else []
+    legs = solution.get("legs", []) if solution else []
     payload = {"markers": markers, "geometry": geometry, "legs": legs, "solved": bool(solution)}
     # JSON lives in a script element: neutralise HTML raw-text terminators, not
     # just JS quotes. Titles enter Leaflet popups as text nodes in the guest.

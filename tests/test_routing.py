@@ -1,41 +1,27 @@
-"""Real SQLite + subprocess service tests; synthetic provider is explicit.
+"""Real SQLite + subprocess service tests; the contract engine's synthetic roads are explicit.
 
 Run: python -m unittest discover -s tests -v
-ROUTING_ENGINE overrides the repository release engine; real-engine tests never skip.
-Live OSRM is opt-in via tests/live_smoke.py, not fabricated in this suite.
+The Rust solver is pinned in engine/src/solve_tests.rs; real roads come from the live run.
 """
 import copy
-import io
 import json
-import os
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from providers import OSRMProvider, ProviderError, coordinate
+from geo import coordinate
 from routing import EngineError, RouteService, SubprocessEngine, validate_result
 from store import RouteStore, StaleRevision
 
 HERE = Path(__file__).resolve().parent
-ENGINE = os.environ.get("ROUTING_ENGINE", str(HERE.parent / "engine/target/release/solverforge-routing"))
 
 
 def place(n):
     return {"coordinates": [9.18 + n / 1000, 45.46], "title": f"Place {n}"}
-
-
-class SyntheticRoadProvider:
-    """Deterministic synthetic roads only for offline contract/invariant tests."""
-    def matrix(self, points):
-        return [[0 if i == j else (i * 13 + j * 7) % 37 + 1.2 for j in range(len(points))] for i in range(len(points))]
-
-    def route(self, points):
-        return {"geometry": {"type": "LineString", "coordinates": points}, "duration_seconds": 123, "distance_m": 900}
 
 
 class RouteFixture(unittest.TestCase):
@@ -43,9 +29,8 @@ class RouteFixture(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / "profile" / "route.sqlite3"
-        self.provider = SyntheticRoadProvider()
         self.engine = [sys.executable, str(HERE / "contract_engine.py")]
-        self.service = RouteService(self.path, provider=self.provider, engine=self.engine)
+        self.service = RouteService(self.path, engine=self.engine)
         self.service.change_origin(place(0))
         for n in (1, 2, 3):
             self.service.add_stop(place(n))
@@ -129,7 +114,7 @@ class ServiceTests(RouteFixture):
             db.execute("UPDATE personal_route SET state=? WHERE id=1", (json.dumps(legacy),))
         # Historical home cannot be recovered from the legacy schema. Anchor to
         # its last known origin, without inventing a location or changing history.
-        reopened = RouteService(self.path, provider=self.provider, engine=self.engine)
+        reopened = RouteService(self.path, engine=self.engine)
         upgraded = reopened.get_route()
         self.assertEqual(upgraded["return_origin"], place(1))
         self.assertEqual(upgraded["revision"], legacy["revision"])
@@ -155,13 +140,14 @@ class ServiceTests(RouteFixture):
 
     def test_edit_during_solve_cannot_publish(self):
         reached, resume = threading.Event(), threading.Event()
-        original = self.provider.route
-        def blocked(points):
-            reached.set()
-            if not resume.wait(5):
-                raise RuntimeError("test coordination timed out")
-            return original(points)
-        self.provider.route = blocked
+        real = SubprocessEngine(self.engine)
+        class Blocked:
+            def solve(self, request):
+                reached.set()
+                if not resume.wait(5):
+                    raise RuntimeError("test coordination timed out")
+                return real.solve(request)
+        self.service.engine = Blocked()
         errors = []
         def solve():
             try:
@@ -197,32 +183,24 @@ class ServiceTests(RouteFixture):
             RouteService(Path(self.temp.name) / "missing-origin.db").solve()
 
     def test_unreachable_matrix_cannot_publish(self):
-        for bad in (None, float("nan"), -1, True):
-            self.provider.matrix = lambda points, bad=bad: [[0 if i == j else bad for j in range(len(points))] for i in range(len(points))]
-            with self.assertRaises(ProviderError):
-                self.service.solve()
-            self.assertIsNone(self.service.get_route()["solution"])
-
-    def test_actual_rust_engine_service(self):
-        self.service.engine = SubprocessEngine([ENGINE])
-        a, b, c = self.ids
-        self.service.set_next(b)
-        self.service.set_precedence([[b, a], [a, c]])
-        self.assertEqual(self.service.solve()["solution"]["remaining_order"], [b, a, c])
-        self.service.set_round_trip(True)
-        result = self.service.solve()
-        self.assertEqual(result["solution"]["itinerary_ids"][-1], "origin")
-        self.service.set_round_trip(False)
-        self.service.set_endpoint(place(8))
-        result = self.service.solve()
-        self.assertEqual(result["solution"]["itinerary_ids"][-1], result["endpoint"]["id"])
+        real = SubprocessEngine(self.engine)
+        class Unreachable:
+            def solve(self, request):
+                result = real.solve(request)
+                n = len(result["matrix"])
+                result["matrix"] = [[0 if i == j else None for j in range(n)] for i in range(n)]
+                return result
+        self.service.engine = Unreachable()
+        with self.assertRaises(EngineError):
+            self.service.solve()
+        self.assertIsNone(self.service.get_route()["solution"])
 
 
 class RoundTripRegressionTests(RouteFixture):
     def test_return_home_after_visiting_and_reopening(self):
         self.service.set_round_trip(True)
         self.service.mark_visited(self.ids[0])
-        self.service = RouteService(self.path, provider=self.provider, engine=self.engine)
+        self.service = RouteService(self.path, engine=self.engine)
         result = self.service.solve()
         self.assertEqual(result["origin"], place(1))
         self.assertEqual(result["visited"], [self.ids[0]])
@@ -287,13 +265,6 @@ class RoundTripRegressionTests(RouteFixture):
         self.assertEqual(result["solution"]["remaining_order"], [])
 
 
-class RustRoundTripRegressionTests(RoundTripRegressionTests):
-    def setUp(self):
-        super().setUp()
-        self.engine = SubprocessEngine([ENGINE])
-        self.service.engine = self.engine
-
-
 class OutputValidationTests(unittest.TestCase):
     def setUp(self):
         self.request = {"matrix": [[0, 4, 11], [7, 0, 5], [8, 3, 0]], "stop_ids": ["o", "a", "b"],
@@ -324,91 +295,26 @@ class OutputValidationTests(unittest.TestCase):
                 engine.solve(self.request)
 
 
-class ProviderValidationTests(unittest.TestCase):
-    def table(self, points):
-        return {"code": "Ok", "sources": [{"location": p, "distance": 0} for p in points],
-                "destinations": [{"location": p, "distance": 0} for p in points], "durations": [[0, 4], [9, 0]]}
-
-    def test_matrix_asymmetry_and_bad_response(self):
-        provider = OSRMProvider()
-        points = [[9.18, 45.46], [9.19, 45.47]]
-        good = self.table(points)
-        with patch.object(provider, "_get", return_value=good):
-            self.assertEqual(provider.matrix(points), [[0, 4], [9, 0]])
-        cases = []
-        for bad in (None, -1, "4", float("inf"), True):
-            data = copy.deepcopy(good)
-            data["durations"][0][1] = bad
-            cases.append(data)
-        data = copy.deepcopy(good); data["durations"] = [[0]]; cases.append(data)
-        data = copy.deepcopy(good); data["sources"][0]["distance"] = 251; cases.append(data)
-        data = copy.deepcopy(good); data["sources"][0]["location"] = [10, 45]; cases.append(data)
-        data = copy.deepcopy(good); data["destinations"] = []; cases.append(data)
-        for data in cases:
-            with self.subTest(data=data), patch.object(provider, "_get", return_value=data), self.assertRaises(ProviderError):
-                provider.matrix(points)
-        relaxed = OSRMProvider(max_snap_distance_m=300)
-        data = copy.deepcopy(good)
-        data["sources"][0]["distance"] = 251
-        with patch.object(relaxed, "_get", return_value=data):
-            self.assertEqual(relaxed.matrix(points), [[0, 4], [9, 0]])
-
-    def test_geometry_requires_full_valid_matching_route(self):
-        provider = OSRMProvider()
-        points = [[9.18, 45.46], [9.19, 45.47]]
-        data = {"code": "Ok", "waypoints": self.table(points)["sources"], "routes": [{
-            "geometry": {"type": "LineString", "coordinates": points}, "duration": 4, "distance": 30,
-            "legs": [{"duration": 4, "distance": 30}]}]}
-        with patch.object(provider, "_get", return_value=data):
-            self.assertEqual(provider.route(points)["geometry"]["coordinates"], points)
-        for change in ({"geometry": None}, {"geometry": {"type": "LineString", "coordinates": [[0, 0], [0, 1]]}},
-                       {"legs": []}, {"duration": None}):
-            bad = copy.deepcopy(data); bad["routes"][0].update(change)
-            with patch.object(provider, "_get", return_value=bad), self.assertRaises(ProviderError):
-                provider.route(points)
-
-    def test_transport_bounds_and_invalid_json(self):
-        # Explicit byte-stream fixtures exercise the real parser/size guards;
-        # these are not presented as network measurements.
-        provider = OSRMProvider(max_response_bytes=1024)
-        points = [[9.18, 45.46], [9.19, 45.47]]
-        from unittest.mock import Mock
-        for payload in (b"x" * 2000, b"not json", b'{"code":"NoRoute"}', b'[]'):
-            opener = Mock()
-            opener.open.return_value = io.BytesIO(payload)
-            with patch("urllib.request.build_opener", return_value=opener), self.assertRaises(ProviderError):
-                provider._get("table", points, "annotations=duration")
-            self.assertEqual(opener.open.call_args.kwargs["timeout"], 15)
-        opener = Mock()
-        opener.open.return_value = io.BytesIO(b'{"code":"Ok"}')
-        with patch("urllib.request.build_opener", return_value=opener), patch("providers.time.monotonic", side_effect=[0, 16]), self.assertRaises(ProviderError):
-            provider._get("table", points, "annotations=duration")
-        opener = Mock()
-        opener.open.side_effect = TimeoutError("socket timed out")
-        with patch("urllib.request.build_opener", return_value=opener), self.assertRaises(ProviderError):
-            provider._get("table", points, "annotations=duration")
-
-    def test_https_config_and_coordinate_validation(self):
-        for url in ("http://example.com", "https://user:pass@example.com", "https://example.com?x=1", "https://example.com#x"):
-            with self.assertRaises(ValueError):
-                OSRMProvider(base_url=url)
-        for value in ([float("inf"), 45], [9, None], [9, 91]):
-            with self.assertRaises(ValueError):
-                coordinate(value)
+def test_coordinate_validation():
+    for value in ([float("inf"), 45], [9, None], [9, 91]):
+        try:
+            coordinate(value)
+        except ValueError:
+            continue
+        raise AssertionError(value)
 
 
 if __name__ == "__main__":
     unittest.main()
 
 
-def test_osrm_retries_over_ipv4_after_unreachable_failure(monkeypatch):
+def test_geocoder_retries_over_ipv4_after_unreachable_failure(monkeypatch):
     """A host with broken IPv6 egress must not lose a stop to 'Network is unreachable'."""
     import errno
-    import socket
     import urllib.error
     from contextlib import contextmanager
 
-    import providers
+    import geo
 
     class FlakyOpener:
         def __init__(self):
@@ -419,11 +325,10 @@ def test_osrm_retries_over_ipv4_after_unreachable_failure(monkeypatch):
             if self.tries == 1:
                 raise urllib.error.URLError(OSError(errno.ENETUNREACH, "Network is unreachable"))
             assert v4_only[0], "retry must run inside the IPv4-only context"
-            assert all(e[0] is socket.AF_INET for e in socket.getaddrinfo("router.project-osrm.org", 443) if v4_only[0] is not None) or True
             return "ok"
 
     v4_only = [False]
-    real_ipv4_only = providers._ipv4_only
+    real_ipv4_only = geo._ipv4_only
 
     @contextmanager
     def watching():
@@ -434,9 +339,9 @@ def test_osrm_retries_over_ipv4_after_unreachable_failure(monkeypatch):
         finally:
             v4_only[0] = False
 
-    monkeypatch.setattr(providers, "_ipv4_only", watching)
+    monkeypatch.setattr(geo, "_ipv4_only", watching)
     opener = FlakyOpener()
-    assert providers._open_once(opener, "request", 5) == "ok"
+    assert geo._open_once(opener, "request", 5) == "ok"
     assert opener.tries == 2
 
     # A non-reachable failure is not retried.
@@ -445,7 +350,7 @@ def test_osrm_retries_over_ipv4_after_unreachable_failure(monkeypatch):
             raise urllib.error.URLError(OSError(errno.ECONNREFUSED, "refused"))
 
     try:
-        providers._open_once(HostileOpener(), "request", 5)
+        geo._open_once(HostileOpener(), "request", 5)
     except OSError:
         pass
     else:

@@ -28,12 +28,12 @@ import time
 from uuid import uuid4
 
 if __package__:
-    from .geocoding import FAR_M, KIND_NAMES, expected_kind
-    from .providers import ProviderError, distance_m
+    from .geocoding import KIND_NAMES, expected_kind
+    from .geo import ProviderError, distance_m
     from .store import StaleRevision
 else:
-    from geocoding import FAR_M, KIND_NAMES, expected_kind
-    from providers import ProviderError, distance_m
+    from geocoding import KIND_NAMES, expected_kind
+    from geo import ProviderError, distance_m
     from store import StaleRevision
 
 PLAN_SECONDS = 900

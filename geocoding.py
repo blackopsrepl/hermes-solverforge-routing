@@ -20,14 +20,13 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
-from unittest.mock import patch
 
 from uuid import uuid4
 
 if __package__:
-    from .providers import ProviderError, coordinate, distance_m
+    from .geo import ProviderError, coordinate, distance_m
 else:
-    from providers import ProviderError, coordinate, distance_m
+    from geo import ProviderError, coordinate, distance_m
 
 DEFAULT_URL = "https://nominatim.openstreetmap.org/search"
 FRESH_SECONDS = 86400
@@ -54,7 +53,7 @@ _OPEN_ONCE = [None]
 
 def _retry_open():
     try:
-        from .providers import _open_once
+        from .geo import _open_once
         return _open_once
     except ImportError:                          # loaded standalone (dashboard tests)
         def plain(opener, request, timeout):
@@ -205,7 +204,7 @@ class NominatimGeocoder:
                 time.sleep(max(0, min(1.05, 1.05 - elapsed)))
                 request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "hermes-solverforge-routing/0.1 (personal route planning; explicit place search)"})
                 started = time.monotonic()
-                # Same IPv4 retry as OSRM: one IPv6 failure must not lose a search.
+                # IPv4 retry: one IPv6 failure must not lose a search.
                 if _OPEN_ONCE[0] is None:
                     _OPEN_ONCE[0] = _retry_open()
                 with _OPEN_ONCE[0](urllib.request.build_opener(NoRedirect()), request, 15) as response:
