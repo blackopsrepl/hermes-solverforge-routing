@@ -13,7 +13,6 @@ Toggling round trips does not reanchor. A configured endpoint is not a visit.
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import subprocess
 import tempfile
@@ -45,11 +44,10 @@ def location(value: dict) -> dict:
 
 class SubprocessEngine:
     """One bounded JSON request/response, no shell or private runtime imports."""
-    def __init__(self, command: Sequence[str] | str | None = None, max_output_bytes: int = 1_000_000):
-        command = command if command is not None else os.environ.get("ROUTING_ENGINE")
+    def __init__(self, command: Sequence[str] | str, max_output_bytes: int = 1_000_000):
         self.command = shlex.split(command) if isinstance(command, str) else list(command or [])
         if not self.command or not all(isinstance(part, str) and part for part in self.command):
-            raise ValueError("supply an engine command or ROUTING_ENGINE")
+            raise ValueError("supply an engine command")
         if not 1024 <= max_output_bytes <= 8_000_000:
             raise ValueError("invalid engine output bound")
         self.max_output_bytes = max_output_bytes

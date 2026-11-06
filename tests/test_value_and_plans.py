@@ -105,7 +105,7 @@ def test_repair_diff_reports_added_removed_moved_visited_and_delta(service):
     state = build(service, [1, 2, 3])
     first = service.solve(solve_seconds=1, expected_revision=state["revision"])
     assert first["solution"]["repair"] is None
-    p1, p2, p3 = [s["id"] for s in first["stops"]]
+    p1, p2, _ = [s["id"] for s in first["stops"]]
     state = service.remove_stop(p2, expected_revision=first["revision"])
     state = service.add_stop(place(1.5, "P1.5"), expected_revision=state["revision"])
     state = service.add_stop(place(10, "P10"), expected_revision=state["revision"])

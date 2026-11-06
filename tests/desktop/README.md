@@ -3,7 +3,7 @@
 From the repository root:
 
 ```sh
-PYTHONPATH="$PWD" ROUTING_ENGINE=/absolute/path/to/solverforge-routing \
+PYTHONPATH="$PWD" \
   uv run --no-project --python 3.12 --with pytest --with fastapi --with httpx --with pyyaml \
   pytest --import-mode=importlib tests -q
 npm --prefix tests/desktop ci --ignore-scripts
@@ -13,17 +13,15 @@ hermes plugins validate .
 ```
 
 `test_plugin.py` exercises registration, lazy profile-isolated storage, all edits,
-revision refusals, stable home versus moving origin, real Rust optimization with
-fixture road responses, and lone-module REST import under concurrent requests.
-Both wrapper and core real-engine tests accept `ROUTING_ENGINE`, falling back to
-`engine/target/release/solverforge-routing` in this repository. Missing engines fail
-rather than silently skipping the real-engine gate. A concurrent import regression
-also verifies no transient generic `providers`/`store` module aliases are published.
+revision refusals, stable home versus moving origin, the engine's JSON contract
+through the labelled test-only engine on synthetic roads (`../contract_engine.py`),
+and lone-module REST import under concurrent requests. A concurrent import regression
+also verifies no transient generic `geo`/`store` module aliases are published.
 For actual headless Chromium click flows with real REST/core/Rust/live roads, see
 [`../browser/README.md`](../browser/README.md).
 
-`test_plugin.py` also drives batch plan → confirm → solve over REST with the real
-Rust engine (synthetic geocoder/roads), checking one-revision application, refusal
+`test_plugin.py` also drives batch plan → confirm → solve over REST with the
+test-only engine (synthetic geocoder/roads), checking one-revision application, refusal
 without writes, savings, links in tool results and QR codes in the REST read.
 
 `render.test.mjs` renders the actual Desktop module through React server rendering
