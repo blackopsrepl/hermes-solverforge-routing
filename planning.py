@@ -2,11 +2,24 @@
 
 plan() performs the searches (shared pacing and profile cache from LocationSearch)
 and stores one pending plan in the profile database. It never edits the route.
-A candidate is preselected only when the provider's results are unambiguous:
-one result, or every result within PRESELECT_RADIUS_M of the top result (the
-same place reported as several map objects). Preselection is a suggestion; the
-route changes only through confirm(), which checks the route revision, requires
-a choice or explicit skip for every item and applies everything in one write.
+Searches are biased toward and ranked by distance from the route's start (the plan's
+origin, else the current origin) and its existing stops; see geocoding.rank().
+
+Preselection rule (decide()). A candidate is preselected only when it is clearly
+the place meant; otherwise the item needs an explicit choice:
+  1. The top-ranked candidate must not be far: more than FAR_M (15 km) from the start
+     and every other stop forces a choice, even for a single result ("far").
+  2. If the query names a kind we can check ("Stazione …" → railway station,
+     "Via …"/"Piazza …" → street), the top candidate must be of that OSM kind
+     ("kind_mismatch" otherwise: e.g. a company called "… Garibaldi").
+  3. No rival: every other candidate is either within PRESELECT_RADIUS_M (250 m) of
+     the top one (the same place as several map objects) or, when the query names a
+     kind, of a different kind (far weaker: no kind bonus). Two streets of the same
+     name in different towns, or two non-co-located results for a query naming no
+     kind, force a choice ("same_name" / "ambiguous").
+Preselection is a suggestion; the route changes only through confirm(), which
+checks the route revision, requires a choice or explicit skip for every item and
+applies everything in one write.
 """
 from __future__ import annotations
 
@@ -15,15 +28,59 @@ import time
 from uuid import uuid4
 
 if __package__:
+    from .geocoding import FAR_M, KIND_NAMES, expected_kind
     from .providers import ProviderError, distance_m
     from .store import StaleRevision
 else:
+    from geocoding import FAR_M, KIND_NAMES, expected_kind
     from providers import ProviderError, distance_m
     from store import StaleRevision
 
 PLAN_SECONDS = 900
 MAX_PLACES = 20
 PRESELECT_RADIUS_M = 250.0
+
+
+CANDIDATE_FIELDS = ("candidate_id", "label", "coordinates", "kind", "locality", "matches_query_kind",
+                    "distance_from_start_m", "nearest_route_point_m", "far")
+
+
+def _km(metres):
+    return f"{metres / 1000:.1f} km"
+
+
+def decide(candidates, kind, region=""):
+    """Apply the documented preselection rule to ranked candidates.
+
+    Returns (status, preselected candidate_id or None, reason code, human note).
+    """
+    if not candidates:
+        return "no_match", None, "no_match", "No map match. It will be skipped; refine the name and plan again."
+    top, count = candidates[0], len(candidates)
+    kind_name = KIND_NAMES.get(kind)
+    if top.get("far"):
+        where = (f"{_km(top['distance_from_start_m'])} from your start" if top.get("distance_from_start_m") is not None
+                 else f"{_km(top['nearest_route_point_m'])} from your nearest stop")
+        lead = "The only match" if count == 1 else "The best match"
+        return "needs_choice", None, "far", f"{lead} is {where}, far from your other stops. Choose explicitly or refine the name/region."
+    if kind and not top.get("matches_query_kind"):
+        return ("needs_choice", None, "kind_mismatch",
+                f"No result is a {kind_name}. Choose explicitly only if one is right, or refine the name (for a station, its official name).")
+    rivals = [c for c in candidates[1:] if distance_m(c["coordinates"], top["coordinates"]) > PRESELECT_RADIUS_M
+              and (kind is None or c.get("matches_query_kind"))]
+    if rivals:
+        places = sorted({c.get("locality") or "?" for c in [top, *rivals]})
+        if kind == "street" and len(places) > 1:
+            town = region.split(",")[0].strip()
+            missing = f" · none in {town}" if town and all((c.get("locality") or "").casefold() != town.casefold() for c in candidates) else ""
+            return "needs_choice", None, "same_name", f"Same street name in {len(places)} places ({', '.join(places)}){missing} · choose one"
+        return "needs_choice", None, "ambiguous", f"{count} possible places · choose one"
+    if count == 1:
+        return "preselected", top["candidate_id"], "single", "One place found · pre-selected, change if wrong"
+    if kind and any(not c.get("matches_query_kind") for c in candidates[1:]):
+        return ("preselected", top["candidate_id"], "kind",
+                f"Best {kind_name} match pre-selected · the other results are not a {kind_name} or are the same spot; change if wrong")
+    return "preselected", top["candidate_id"], "colocated", f"{count} map matches at the same spot · best pre-selected, change if wrong"
 
 
 class StalePlan(StaleRevision):
@@ -42,7 +99,7 @@ class BatchPlanner:
         with store._connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS pending_plans (id TEXT PRIMARY KEY, expires REAL NOT NULL, value TEXT NOT NULL)")
 
-    def _item(self, index, role, spec, default_region):
+    def _item(self, index, role, spec, default_region, origin=None, stops=()):
         if isinstance(spec, dict) and "coordinates" in spec:
             place = self.location(spec)
             return {"index": index, "role": role, "status": "supplied", "query": None, "region": None,
@@ -51,19 +108,19 @@ class BatchPlanner:
             raise ValueError("each place needs a query and optional region, or explicit coordinates")
         query = _text(spec.get("query"), "query", 300, True)
         region = _text(spec.get("region", default_region), "region", 200)
-        item = {"index": index, "role": role, "query": query, "region": region, "candidates": [], "preselected": None}
+        kind = expected_kind(query)
+        item = {"index": index, "role": role, "query": query, "region": region, "candidates": [], "preselected": None,
+                "expected_kind": KIND_NAMES.get(kind)}
         try:
-            found = self.locations.search(query, region)
+            found = self.locations.search(query, region, origin=origin, stops=stops)
         except ProviderError as exc:
-            return {**item, "status": "search_failed", "error": str(exc)}
-        candidates = [{key: c[key] for key in ("candidate_id", "label", "coordinates")} for c in found["candidates"]]
-        item.update(candidates=candidates, provider_query=found["provider_query"], cached=found["cached"])
-        if not candidates:
-            item["status"] = "no_match"
-        elif all(distance_m(c["coordinates"], candidates[0]["coordinates"]) <= PRESELECT_RADIUS_M for c in candidates):
-            item.update(status="preselected", preselected=candidates[0]["candidate_id"])
-        else:
-            item["status"] = "needs_choice"
+            return {**item, "status": "search_failed", "reason": "search_failed", "error": str(exc),
+                    "note": f"Search failed: {exc}. Skip it or ask Hermes to plan again."}
+        candidates = [{key: c.get(key) for key in CANDIDATE_FIELDS} for c in found["candidates"]]
+        status, preselected, reason, note = decide(candidates, kind, region)
+        item.update(candidates=candidates, provider_query=found["provider_query"], cached=found["cached"],
+                    viewbox=found["viewbox"], status=status, preselected=preselected, reason=reason, note=note,
+                    far=bool(candidates and candidates[0].get("far")))
         return item
 
     def plan(self, places, *, region="", origin=None, round_trip=None, endpoint=...):
@@ -92,7 +149,20 @@ class BatchPlanner:
             else:
                 _text(spec.get("query"), "query", 300, True)
                 _text(spec.get("region", region), "region", 200)
-        items = [self._item(i, role, spec, region) for i, (role, spec) in enumerate(specs)]
+        # Proximity anchors: the plan's origin (pin, or a preselected named origin),
+        # else the current origin; plus the route's unvisited stops.
+        start = state["origin"]["coordinates"] if state["origin"] else None
+        stops = [s["coordinates"] for s in state["stops"] if not s.get("visited")]
+        items = []
+        for i, (role, spec) in enumerate(specs):
+            if role == "origin":  # a new start: rank near the old start and stops, not "from start"
+                item = self._item(i, role, spec, region, stops=([start] if start else []) + stops)
+            else:
+                item = self._item(i, role, spec, region, origin=start, stops=stops)
+            if role == "origin":
+                chosen = item.get("location") or next((c for c in item["candidates"] if c["candidate_id"] == item["preselected"]), None)
+                start = chosen["coordinates"] if chosen else start
+            items.append(item)
         now = time.time()
         plan = {"plan_id": uuid4().hex, "base_revision": revision, "created_at": now, "expires_at": now + PLAN_SECONDS,
                 "round_trip": round_trip, "endpoint_action": "keep" if endpoint is ... else ("clear" if endpoint is None else "set"),

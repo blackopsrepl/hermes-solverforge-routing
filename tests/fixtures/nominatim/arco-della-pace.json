@@ -1,0 +1,203 @@
+{
+ "source": "https://nominatim.openstreetmap.org/search",
+ "captured_at": "2026-11-06T08:25:16+00:00",
+ "params": {
+  "q": "Arco della Pace, Milano, Italia",
+  "format": "jsonv2",
+  "limit": 8,
+  "addressdetails": 1,
+  "viewbox": "8.84,45.74,9.56,45.24",
+  "bounded": 0
+ },
+ "query": "Arco della Pace",
+ "region": "Milano, Italia",
+ "origin": [
+  9.2045,
+  45.4862
+ ],
+ "note": "Unmodified Nominatim jsonv2 response. Data © OpenStreetMap contributors (ODbL).",
+ "response": [
+  {
+   "place_id": 75892240,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "relation",
+   "osm_id": 18237414,
+   "lat": "45.4756927",
+   "lon": "9.1724257",
+   "category": "building",
+   "type": "yes",
+   "place_rank": 30,
+   "importance": 0.4422097936253295,
+   "addresstype": "building",
+   "name": "Arco della Pace",
+   "display_name": "Arco della Pace, Piazza Sempione, Parco Sempione, Municipio 1, Milano, Rodano, Milano, Lombardia, 20154, Italia",
+   "address": {
+    "building": "Arco della Pace",
+    "road": "Piazza Sempione",
+    "census": "Parco Sempione",
+    "suburb": "Municipio 1",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20154",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4755604",
+    "45.4758244",
+    "9.1722364",
+    "9.1726142"
+   ]
+  },
+  {
+   "place_id": 75890714,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "way",
+   "osm_id": 252061703,
+   "lat": "45.4764173",
+   "lon": "9.1714021",
+   "category": "railway",
+   "type": "platform",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "railway",
+   "name": "Arco della Pace",
+   "display_name": "Arco della Pace, Corso Sempione, Pagano, Municipio 1, Milano, Rodano, Milano, Lombardia, 20154, Italia",
+   "address": {
+    "railway": "Arco della Pace",
+    "road": "Corso Sempione",
+    "quarter": "Pagano",
+    "suburb": "Municipio 1",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20154",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4763006",
+    "45.4765362",
+    "9.1712464",
+    "9.1715593"
+   ]
+  },
+  {
+   "place_id": 420427090,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "way",
+   "osm_id": 1219963659,
+   "lat": "45.4769373",
+   "lon": "9.1708431",
+   "category": "highway",
+   "type": "platform",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "highway",
+   "name": "Arco della Pace",
+   "display_name": "Arco della Pace, Corso Sempione, Borgo Ortolani, Sarpi, Municipio 1, Milano, Rodano, Milano, Lombardia, 20154, Italia",
+   "address": {
+    "highway": "Arco della Pace",
+    "road": "Corso Sempione",
+    "neighbourhood": "Borgo Ortolani",
+    "quarter": "Sarpi",
+    "suburb": "Municipio 1",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20154",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4768222",
+    "45.4770524",
+    "9.1706852",
+    "9.1710009"
+   ]
+  },
+  {
+   "place_id": 77299749,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 723173232,
+   "lat": "45.4769749",
+   "lon": "9.1707688",
+   "category": "railway",
+   "type": "tram_stop",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "railway",
+   "name": "Arco della Pace",
+   "display_name": "Arco della Pace, Corso Sempione, Borgo Ortolani, Sarpi, Municipio 1, Milano, Rodano, Milano, Lombardia, 20154, Italia",
+   "address": {
+    "railway": "Arco della Pace",
+    "road": "Corso Sempione",
+    "neighbourhood": "Borgo Ortolani",
+    "quarter": "Sarpi",
+    "suburb": "Municipio 1",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20154",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4769249",
+    "45.4770249",
+    "9.1707188",
+    "9.1708188"
+   ]
+  },
+  {
+   "place_id": 77288683,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 723173234,
+   "lat": "45.4764291",
+   "lon": "9.1714243",
+   "category": "railway",
+   "type": "tram_stop",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "railway",
+   "name": "Arco della Pace",
+   "display_name": "Arco della Pace, Corso Sempione, Pagano, Municipio 1, Milano, Rodano, Milano, Lombardia, 20154, Italia",
+   "address": {
+    "railway": "Arco della Pace",
+    "road": "Corso Sempione",
+    "quarter": "Pagano",
+    "suburb": "Municipio 1",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20154",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4763791",
+    "45.4764791",
+    "9.1713743",
+    "9.1714743"
+   ]
+  }
+ ]
+}

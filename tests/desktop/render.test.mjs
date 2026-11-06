@@ -32,7 +32,9 @@ test('current road geometry, stable home, driving disclaimers and coordinate con
 })
 test('explicit search controls and disclosure without autocomplete',()=>{
  const html=renderPage({data:data()})
- for(const text of ['Place or address','Region context','Search sends exactly','no autocomplete or IP guessing','Do not send confidential locations','Or enter exact coordinates']) assert.ok(html.includes(text),text)
+ for(const text of ['Place or address','Region context','Search sends the place and region you type','approximate area around your start','no autocomplete or IP guessing','Do not send confidential locations','Or enter exact coordinates']) assert.ok(html.includes(text),text)
+ assert.ok(!html.includes('“”') && !html.includes('exactly “'),'empty query never renders an empty quoted disclosure')
+ assert.ok(source.includes('Search sends exactly “${searchQuery}'),'typed query is disclosed verbatim')
  assert.ok(source.includes("'/actions/search_locations'"))
  assert.ok(source.includes("action('confirm_location'"))
  assert.ok(!source.includes('onKeyUp'))
@@ -81,15 +83,16 @@ test('unsafe or unknown links and malformed QR are never rendered',()=>{
 })
 const plan={plan_id:'p'.repeat(32),base_revision:3,expires_at:1900000000,round_trip:true,endpoint_action:'keep',items:[
  {index:0,role:'origin',status:'supplied',query:null,location:{title:'Shared location (shared 09:12)',coordinates:[9.17,45.47]},candidates:[]},
- {index:1,role:'stop',status:'preselected',query:'Duomo',region:'Milano',preselected:'a'.repeat(32),candidates:[{candidate_id:'a'.repeat(32),label:'Duomo di Milano',coordinates:[9.19,45.46]}]},
- {index:2,role:'stop',status:'needs_choice',query:'San Marco',region:'Milano',preselected:null,candidates:[{candidate_id:'b'.repeat(32),label:'San Marco, Milano',coordinates:[9.18,45.47]},{candidate_id:'c'.repeat(32),label:'San Marco, Venezia',coordinates:[12.3,45.4]}]},
+ {index:1,role:'stop',status:'preselected',query:'Duomo',region:'Milano',preselected:'a'.repeat(32),candidates:[{candidate_id:'a'.repeat(32),label:'Duomo di Milano',coordinates:[9.19,45.46],kind:'place of worship',locality:'Milano',distance_from_start_m:2300,far:false}]},
+ {index:2,role:'stop',status:'needs_choice',reason:'same_name',far:false,note:'Same street name in 2 places (Legnano, Sesto San Giovanni) · none in Milano · choose one',query:'Via Roma',region:'Milano',preselected:null,candidates:[{candidate_id:'b'.repeat(32),label:'Via Roma, Sesto San Giovanni',coordinates:[9.23,45.53],kind:'street',locality:'Sesto San Giovanni',distance_from_start_m:5645,far:false},{candidate_id:'c'.repeat(32),label:'Via Roma, Legnano',coordinates:[8.91,45.6],kind:'street',locality:'Legnano',distance_from_start_m:25910,far:true}]},
  {index:3,role:'stop',status:'no_match',query:'Nowhere',region:'Milano',preselected:null,candidates:[]}]}
 test('pending plan shows choices and one apply button, also in the chat card',()=>{
  setFixture({data:{...data(),pending_plan:plan}})
  const card=renderToStaticMarkup(contributions.find(c=>c.area==='directives').data.render({attrs:{}}))
- for(const text of ['Planned places · nothing added yet','Start: Shared location (shared 09:12)','One place found · pre-selected','2 possible places · choose one','San Marco, Venezia','No map match','Skip this place','Choose a match or skip for 1 place','Add 2 places in one change','return home']) assert.ok(card.includes(text),text)
+ for(const text of ['Planned places · nothing added yet','Start: Shared location (shared 09:12)','One place found · pre-selected','Same street name in 2 places (Legnano, Sesto San Giovanni) · none in Milano · choose one','Via Roma, Legnano','street · Legnano · 25.9 km from start','⚠ far from your other stops','place of worship · Milano · 2.3 km from start','street · Sesto San Giovanni · 5.6 km from start','same-name streets in different towns need your choice','No map match','Skip this place','Choose a match or skip for 1 place','Add 2 places in one change','return home']) assert.ok(card.includes(text),text)
  assert.ok(/<button disabled="">Add 2 places in one change/.test(card),'apply waits for the unresolved choice')
  assert.ok(!card.includes('Mark visited'))
+ assert.equal(card.split('⚠ far from your other stops').length-1,1,'only the far candidate is flagged')
  const stale=renderPage({data:{...data(),pending_plan:{...plan,base_revision:2}}})
  assert.ok(stale.includes('The route changed after this plan was made'))
  assert.ok(source.includes("action:'confirm_plan'"))

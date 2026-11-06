@@ -1,0 +1,124 @@
+{
+ "source": "https://nominatim.openstreetmap.org/search",
+ "captured_at": "2026-11-06T08:25:15+00:00",
+ "params": {
+  "q": "Darsena Milano, Milano, Italia",
+  "format": "jsonv2",
+  "limit": 8,
+  "addressdetails": 1,
+  "viewbox": "8.84,45.74,9.56,45.24",
+  "bounded": 0
+ },
+ "query": "Darsena Milano",
+ "region": "Milano, Italia",
+ "origin": [
+  9.2045,
+  45.4862
+ ],
+ "note": "Unmodified Nominatim jsonv2 response. Data © OpenStreetMap contributors (ODbL).",
+ "response": [
+  {
+   "place_id": 75334041,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 10816636699,
+   "lat": "45.4529111",
+   "lon": "9.1785725",
+   "category": "shop",
+   "type": "bicycle",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "shop",
+   "name": "Darsena",
+   "display_name": "Darsena, Viale Gabriele d'Annunzio, Navigli, Municipio 6, Milano, Rodano, Milano, Lombardia, 20123, Italia",
+   "address": {
+    "shop": "Darsena",
+    "road": "Viale Gabriele d'Annunzio",
+    "quarter": "Navigli",
+    "suburb": "Municipio 6",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20123",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4528611",
+    "45.4529611",
+    "9.1785225",
+    "9.1786225"
+   ]
+  },
+  {
+   "place_id": 76291555,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "way",
+   "osm_id": 70585278,
+   "lat": "45.4568158",
+   "lon": "9.1621471",
+   "category": "waterway",
+   "type": "canal",
+   "place_rank": 20,
+   "importance": 0.13341724040588995,
+   "addresstype": "canal",
+   "name": "Olona - Ramo Darsena",
+   "display_name": "Olona - Ramo Darsena, Municipio 6, Milano, Rodano, Milano, Lombardia, Italia",
+   "address": {
+    "canal": "Olona - Ramo Darsena",
+    "suburb": "Municipio 6",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4549697",
+    "45.4590403",
+    "9.1504026",
+    "9.1737961"
+   ]
+  },
+  {
+   "place_id": 76397669,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 4255148738,
+   "lat": "45.4622132",
+   "lon": "9.2836779",
+   "category": "waterway",
+   "type": "dock",
+   "place_rank": 20,
+   "importance": 0.13339389410238803,
+   "addresstype": "dock",
+   "name": "Darsena Idroscalo",
+   "display_name": "Darsena Idroscalo, Novegro, Segrate, Rodano, Milano, Lombardia, 20054, Italia",
+   "address": {
+    "dock": "Darsena Idroscalo",
+    "village": "Novegro",
+    "town": "Segrate",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20054",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4621632",
+    "45.4622632",
+    "9.2836279",
+    "9.2837279"
+   ]
+  }
+ ]
+}

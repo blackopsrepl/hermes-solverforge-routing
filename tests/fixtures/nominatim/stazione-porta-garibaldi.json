@@ -1,0 +1,95 @@
+{
+ "source": "https://nominatim.openstreetmap.org/search",
+ "captured_at": "2026-11-06T08:25:10+00:00",
+ "params": {
+  "q": "Stazione Porta Garibaldi, Milano, Italia",
+  "format": "jsonv2",
+  "limit": 8,
+  "addressdetails": 1,
+  "viewbox": "8.84,45.74,9.56,45.24",
+  "bounded": 0
+ },
+ "query": "Stazione Porta Garibaldi",
+ "region": "Milano, Italia",
+ "origin": [
+  9.2045,
+  45.4862
+ ],
+ "note": "Unmodified Nominatim jsonv2 response. Data © OpenStreetMap contributors (ODbL).",
+ "response": [
+  {
+   "place_id": 75846057,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 5450827385,
+   "lat": "45.4814777",
+   "lon": "9.1953769",
+   "category": "office",
+   "type": "company",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "office",
+   "name": "Samsung Electronics Italia srl",
+   "display_name": "Samsung Electronics Italia srl, 9, Via Mike Bongiorno, Centro Direzionale, GARIBALDI REPUBBLICA, Municipio 9, Milano, Rodano, Milano, Lombardia, 20124, Italia",
+   "address": {
+    "office": "Samsung Electronics Italia srl",
+    "house_number": "9",
+    "road": "Via Mike Bongiorno",
+    "neighbourhood": "Centro Direzionale",
+    "quarter": "GARIBALDI REPUBBLICA",
+    "suburb": "Municipio 9",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20124",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4814277",
+    "45.4815277",
+    "9.1953269",
+    "9.1954269"
+   ]
+  },
+  {
+   "place_id": 76113506,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "node",
+   "osm_id": 6218865089,
+   "lat": "45.4805808",
+   "lon": "9.1894914",
+   "category": "office",
+   "type": "company",
+   "place_rank": 30,
+   "importance": 8.390707255660361e-05,
+   "addresstype": "office",
+   "name": "Amazon Italia",
+   "display_name": "Amazon Italia, 3/5, Viale Monte Grappa, Brera, Municipio 1, Milano, Rodano, Milano, Lombardia, 20100, Italia",
+   "address": {
+    "office": "Amazon Italia",
+    "house_number": "3/5",
+    "road": "Viale Monte Grappa",
+    "suburb": "Brera",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20100",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4805308",
+    "45.4806308",
+    "9.1894414",
+    "9.1895414"
+   ]
+  }
+ ]
+}

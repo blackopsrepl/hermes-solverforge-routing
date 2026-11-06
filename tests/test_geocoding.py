@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from geocoding import NominatimGeocoder
+from geocoding import MAX_RESULTS, NominatimGeocoder
 from providers import ProviderError
 from routing import RouteService
 from store import StaleRevision
@@ -20,7 +20,7 @@ class SyntheticGeocoder:
     url = "https://example.test/search"
     def __init__(self):
         self.calls = []
-    def search(self, query, region):
+    def search(self, query, region, viewbox=None):
         self.calls.append((query, region))
         return [{"label": "San Marco, Milano", "coordinates": [9.188, 45.478]},
                 {"label": "San Marco, Venezia", "coordinates": [12.34, 45.43]}]
@@ -100,7 +100,7 @@ def test_https_bounds_and_concurrent_global_pacing(tmp_path):
 
 @pytest.mark.parametrize('raw', [b'x'*262145, b'{bad json', b'{}',
     json.dumps([{'display_name':'X','lon':'nan','lat':'45'}]).encode(),
-    json.dumps([{'display_name':'X','lon':'9','lat':'45'}]*6).encode()])
+    json.dumps([{'display_name':'X','lon':'9','lat':'45'}]*(MAX_RESULTS+1)).encode()])
 def test_provider_rejects_malformed_and_unbounded_responses(tmp_path, raw):
     class Opener:
         def open(self, request, timeout):
@@ -112,7 +112,7 @@ def test_provider_rejects_malformed_and_unbounded_responses(tmp_path, raw):
 
 def test_empty_results_never_change_route(tmp_path):
     provider = SyntheticGeocoder()
-    provider.search = lambda query, region: []
+    provider.search = lambda query, region, viewbox=None: []
     service = RouteService(tmp_path/'empty.db', geocoder=provider)
     result = service.search_locations('Nonexistent fixture', 'Test region')
     assert result['candidates'] == []

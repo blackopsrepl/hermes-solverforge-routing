@@ -46,11 +46,19 @@ The flow explicitly searches public Milan landmarks with region context, chooses
   Google), and the rendered QR code, screenshotted from Chromium, decodes with OpenCV
   to the exact phone link.
 - The repair after adding Teatro alla Scala shows the “What changed” diff.
+- Single searches choose candidates deliberately (label/kind predicates such as
+  “railway station named Milano Centrale”), never simply the first; the empty-query
+  hint is neutral and the typed query is disclosed verbatim (`search-empty-hint.png`).
 - Batch planning in a fresh profile: an agent-style `plan_places` request (shared-pin
-  origin plus five Milan names, live Nominatim) writes nothing; the chat card
-  (`?card=1`) shows the pending plan, ambiguous items are chosen, and one Add +
-  Confirm applies all in one revision; a live solve reports savings only when the
-  comparison fields justify them.
+  origin plus five Milan names, live Nominatim, viewbox around the pin) writes
+  nothing. “Stazione Porta Garibaldi” must be `kind_mismatch` (Nominatim returns only
+  companies for that phrasing) and “Via Roma” `same_name` with “none in Milano”
+  and Legnano flagged far (`card-plan-needs-choice.png`). The person then refines the
+  station to “Milano Porta Garibaldi” (preselected railway station) and chooses each
+  remaining place by an explicit predicate (Darsena within 300 m of the basin, the
+  nearest non-far Via Roma) in the chat card (`card-pending-plan.png`); one Add +
+  Confirm applies all in one revision; every stop is within 15 km of the pin and the
+  savings claim equals given minus optimised duration on the same matrix.
 - Constraints, stale-write refusal and mark visited use real API state. Writes
   require confirmation, stale geometry disappears, and return-home stays stable.
 

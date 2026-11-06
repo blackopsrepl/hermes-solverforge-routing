@@ -46,6 +46,14 @@ function Handoff({nav}) {
     paragraph(nav.disclosure)
   ]})
 }
+const km = metres => `${(metres/1000).toFixed(1)} km`
+// Kind, locality and distance on every candidate so a station is not confused with a
+// company and a street in one town with the same name in another.
+const facts = c => [c.kind, c.locality, c.distance_from_start_m != null ? `${km(c.distance_from_start_m)} from start` : c.nearest_route_point_m != null ? `${km(c.nearest_route_point_m)} from nearest stop` : null].filter(Boolean).join(' · ')
+const farFlag = c => c.far ? jsx('strong',{style:{color:'var(--ui-warning, #f5b041)'},children:' · ⚠ far from your other stops'}) : null
+function CandidateText({c}) {
+  return jsxs('span',{children:[` ${c.label} (${c.coordinates.join(', ')})`,jsxs('span',{style:{...muted,display:'block',marginLeft:22},children:[facts(c),farFlag(c)]})]})
+}
 const initialChoice = item => item.status === 'supplied' ? 'use' : item.preselected || (item.status === 'needs_choice' ? null : 'skip')
 const ROLE = { origin:'Start', stop:'Stop', endpoint:'End' }
 function PendingPlan({plan, state, onApply, busy}) {
@@ -57,14 +65,15 @@ function PendingPlan({plan, state, onApply, busy}) {
   const ends = [plan.round_trip===true?'return home':plan.round_trip===false?'no return home':null, plan.endpoint_action==='clear'?'clear the fixed end':null].filter(Boolean)
   return jsxs('div',{style:{...panel,borderColor:'var(--ui-accent)',display:'flex',flexDirection:'column',gap:8},children:[
     jsx('h3',{style:{margin:0},children:'Planned places · nothing added yet'}),
-    paragraph(`Check each match, then add everything in one change. Suggested picks are pre-filled only when the map search found a single place (or several map objects at the same spot). Expires ${new Date(plan.expires_at*1000).toLocaleTimeString()}.${ends.length?` Also: ${ends.join(', ')}.`:''}`),
+    paragraph(`Check each match, then add everything in one change. Suggested picks are pre-filled only when one match is clearly best: a single place (or several map objects at the same spot) of the kind you named, near your route. Far matches, other kinds and same-name streets in different towns need your choice. Expires ${new Date(plan.expires_at*1000).toLocaleTimeString()}.${ends.length?` Also: ${ends.join(', ')}.`:''}`),
     jsx('ol',{style:{paddingLeft:20,margin:0},children:plan.items.map(item => jsxs('li',{style:{marginBottom:12},children:[
       jsx('strong',{children:`${ROLE[item.role]}: ${item.query ?? item.location?.title ?? 'Supplied location'}`}), item.region ? jsx('span',{style:muted,children:` · ${item.region}`}) : null,
       item.status === 'supplied' ? paragraph(`Supplied coordinates ${item.location.coordinates.join(', ')}`) :
       item.status === 'search_failed' ? paragraph(`Search failed: ${item.error}. Skip it or ask Hermes to plan again.`) :
       item.status === 'no_match' ? paragraph('No map match. It will be skipped; refine the name and plan again.') :
+      item.note ? jsx('p',{style:{...muted,margin:'6px 0',...(item.far||item.reason==='kind_mismatch'?{color:'var(--ui-warning, #f5b041)',fontWeight:600}:{})},children:(item.far?'⚠ ':'')+item.note}) :
       paragraph(item.status === 'preselected' ? (item.candidates.length > 1 ? `${item.candidates.length} map matches at the same spot · first pre-selected, change if wrong` : 'One place found · pre-selected, change if wrong') : `${item.candidates.length} possible places · choose one`),
-      ...(item.candidates || []).map(c => jsxs('label',{style:{display:'block',overflowWrap:'anywhere',fontSize:13},children:[jsx('input',{type:'radio',name:`plan-${plan.plan_id}-${item.index}`,checked:choices[item.index]===c.candidate_id,disabled:stale||busy,onChange:()=>setChoices({...choices,[item.index]:c.candidate_id})}),` ${c.label} (${c.coordinates.join(', ')})`]},c.candidate_id)),
+      ...(item.candidates || []).map(c => jsxs('label',{style:{display:'block',overflowWrap:'anywhere',fontSize:13,marginBottom:4},children:[jsx('input',{type:'radio',name:`plan-${plan.plan_id}-${item.index}`,checked:choices[item.index]===c.candidate_id,disabled:stale||busy,onChange:()=>setChoices({...choices,[item.index]:c.candidate_id})}),jsx(CandidateText,{c})]},c.candidate_id)),
       item.status !== 'supplied' && item.candidates?.length ? jsxs('label',{style:{display:'block',fontSize:13},children:[jsx('input',{type:'radio',name:`plan-${plan.plan_id}-${item.index}`,checked:choices[item.index]==='skip',disabled:stale||busy,onChange:()=>setChoices({...choices,[item.index]:'skip'})}),' Skip this place']}) : null
     ]},item.index))}),
     stale ? paragraph('The route changed after this plan was made. Ask Hermes to plan these places again.') : unresolved.length ? paragraph(`Choose a match or skip for ${unresolved.length} place${unresolved.length===1?'':'s'}.`) : null,
@@ -135,11 +144,12 @@ function RoutingSurface({ editable = false, scope }) {
     editable ? jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:12},children:[
       jsx('h3',{style:{margin:0},children:'Find an address or place'}),
       jsxs('div',{style:row,children:[jsx('input',{style:field,value:searchQuery,disabled:searching,maxLength:300,onChange:e=>{setSearchQuery(e.target.value);setResults(null);setChosen(null)},'aria-label':'Place or address',placeholder:'Place or street address'}),jsx('input',{style:field,value:region,disabled:searching,maxLength:200,onChange:e=>{setRegion(e.target.value);setResults(null);setChosen(null)},'aria-label':'Region context',placeholder:'City, region, country'})]}),
-      paragraph(`Search sends exactly “${searchQuery}${region?', '+region:''}” to ${data.geocoder?.url || 'the configured geocoder'} unless cached. Explicit search only; no autocomplete or IP guessing. Do not send confidential locations.`),
+      paragraph(`${searchQuery.trim() ? `Search sends exactly “${searchQuery}${region?', '+region:''}”` : 'Search sends the place and region you type'} to ${data.geocoder?.url || 'the configured geocoder'} unless cached${state.origin||state.stops.length?', with an approximate area around your start (rounded, about ±28 km) to prefer nearby places':''}. Explicit search only; no autocomplete or IP guessing. Do not send confidential locations.`),
       button(searching?'Searching…':'Search',search,searching || !searchQuery.trim()),
       results ? jsxs('div',{children:[paragraph(`Query sent / cached: “${results.provider_query}” · ${results.cached?'profile cache':'provider response'}. ${results.attribution}`),paragraph(results.uncertainty),
-        jsx('ul',{style:{paddingLeft:20},children:results.candidates.map(candidate=>jsx('li',{style:{marginBottom:12},children:jsxs('label',{style:{display:'block',overflowWrap:'anywhere'},children:[jsx('input',{type:'radio',name:'candidate',checked:chosen===candidate.candidate_id,onChange:()=>setChosen(candidate.candidate_id)}),` ${candidate.label} (${candidate.coordinates.join(', ')})`,paragraph(candidate.uncertainty)]})},candidate.candidate_id))}),
+        jsx('ul',{style:{paddingLeft:20},children:results.candidates.map(candidate=>jsx('li',{style:{marginBottom:12},children:jsxs('label',{style:{display:'block',overflowWrap:'anywhere'},children:[jsx('input',{type:'radio',name:'candidate',checked:chosen===candidate.candidate_id,onChange:()=>setChosen(candidate.candidate_id)}),jsx(CandidateText,{c:candidate}),paragraph(candidate.uncertainty)]})},candidate.candidate_id))}),
         !results.candidates.length?paragraph('No matches. Refine the place and region, then Search again.'):null,
+        results.expected_kind && results.candidates.length && !results.candidates.some(c=>c.matches_query_kind)?paragraph(`No result is a ${results.expected_kind}. Refine the name (for a station, its official name) before choosing.`):null,
         jsxs('div',{style:row,children:[['Use as origin','origin'],['Add named stop','stop'],['Use as endpoint','endpoint']].map(([text,role])=>button(text,()=>action('confirm_location',{candidate_id:chosen,role}),!chosen))})]}):null,
       jsx('h3',{style:{margin:0},children:'Or enter exact coordinates'}),
       jsxs('div',{style:row,children:[jsx('input',{style:field,value:title,onChange:e=>setTitle(e.target.value),placeholder:'Location title','aria-label':'Location title'}),

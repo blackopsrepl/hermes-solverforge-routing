@@ -1,0 +1,57 @@
+{
+ "source": "https://nominatim.openstreetmap.org/search",
+ "captured_at": "2026-11-06T08:25:18+00:00",
+ "params": {
+  "q": "Basilica di Sant'Eustorgio, Milano, Italia",
+  "format": "jsonv2",
+  "limit": 8,
+  "addressdetails": 1,
+  "viewbox": "8.84,45.74,9.56,45.24",
+  "bounded": 0
+ },
+ "query": "Basilica di Sant'Eustorgio",
+ "region": "Milano, Italia",
+ "origin": [
+  9.2045,
+  45.4862
+ ],
+ "note": "Unmodified Nominatim jsonv2 response. Data © OpenStreetMap contributors (ODbL).",
+ "response": [
+  {
+   "place_id": 76108187,
+   "licence": "Data © OpenStreetMap contributors, ODbL 1.0. http://osm.org/copyright",
+   "osm_type": "way",
+   "osm_id": 165882138,
+   "lat": "45.4539709",
+   "lon": "9.1814682",
+   "category": "amenity",
+   "type": "place_of_worship",
+   "place_rank": 30,
+   "importance": 0.46228184180918325,
+   "addresstype": "amenity",
+   "name": "Basilica di Sant'Eustorgio",
+   "display_name": "Basilica di Sant'Eustorgio, Piazza Sant'Eustorgio, Vetra, Ticinese, Municipio 1, Milano, Rodano, Milano, Lombardia, 20122, Italia",
+   "address": {
+    "amenity": "Basilica di Sant'Eustorgio",
+    "road": "Piazza Sant'Eustorgio",
+    "neighbourhood": "Vetra",
+    "suburb": "Ticinese",
+    "city": "Milano",
+    "municipality": "Rodano",
+    "county": "Milano",
+    "ISO3166-2-lvl6": "IT-MI",
+    "state": "Lombardia",
+    "ISO3166-2-lvl4": "IT-25",
+    "postcode": "20122",
+    "country": "Italia",
+    "country_code": "it"
+   },
+   "boundingbox": [
+    "45.4537462",
+    "45.4541840",
+    "9.1810263",
+    "9.1819643"
+   ]
+  }
+ ]
+}

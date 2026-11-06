@@ -186,7 +186,7 @@ def test_search_confirmation_api_contract_and_profile_scope(tmp_path, monkeypatc
     import importlib
     geocoding = importlib.import_module('.geocoding', package.__name__)
     calls = []
-    def synthetic_search(self, query, region):
+    def synthetic_search(self, query, region, viewbox=None):
         calls.append((query, region))
         return [{'label':'San Marco, Milano', 'coordinates':[9.18,45.47]},
                 {'label':'San Marco, Venezia', 'coordinates':[12.34,45.43]}]
@@ -228,7 +228,7 @@ def test_batch_plan_navigation_and_value_over_rest_with_real_engine(tmp_path, mo
     answers = {'Duomo': [{'label':'Duomo di Milano','coordinates':[9.1919,45.4642]}],
                'San Marco': [{'label':'San Marco, Milano','coordinates':[9.188,45.478]}, {'label':'San Marco, Venezia','coordinates':[12.34,45.43]}],
                'Castello': [{'label':'Castello Sforzesco','coordinates':[9.1795,45.4705]}]}
-    monkeypatch.setattr(geocoding.NominatimGeocoder, 'search', lambda self, q, r: answers[q])
+    monkeypatch.setattr(geocoding.NominatimGeocoder, 'search', lambda self, q, r, viewbox=None: answers[q])
     # Synthetic roads (explicit, offline): seconds proportional to longitude gap.
     monkeypatch.setattr(providers.OSRMProvider, 'matrix', lambda self, pts: [[round(abs(a[0]-b[0])*10000) for b in pts] for a in pts])
     monkeypatch.setattr(providers.OSRMProvider, 'route', lambda self, pts: {'geometry':{'type':'LineString','coordinates':pts},'distance_m':1000,'duration_seconds':600})

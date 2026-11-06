@@ -34,10 +34,28 @@ The plugin does no message parsing of its own and Desktop has no geolocation.
 place (same Nominatim pacing, limits and 24-hour profile cache as single search; up
 to 20 places plus origin/endpoint), stores one pending plan per profile for 15 minutes
 and **writes nothing**. `origin` may be a place query, explicit coordinates (a shared
-pin) or omitted to keep the current origin. A candidate is preselected only when the
-search is unambiguous: a single result, or all results within 250 m of the top one
-(the same place reported as several map objects). Preselection is a suggestion shown
-for review. `route_confirm_plan(plan_id, expected_revision, choices, skip)` applies
+pin) or omitted to keep the current origin. Each search is biased toward and ranked
+by distance from that start and the route's stops (see *Proximity and ranking*).
+
+**Preselection rule.** A candidate is preselected only when it is clearly the place
+meant; every other item needs an explicit choice, with `reason` and a `note` saying why:
+
+1. *far* — the top candidate is more than 15 km from the start and from every other
+   stop. Even a single result is then not preselected; the plan card flags it
+   “⚠ far from your other stops”.
+2. *kind_mismatch* — the query names a kind we can check (`Stazione …`, `… station`,
+   `Bahnhof` → railway station; `Via …`, `Piazza …`, `… Street`, `…straße` → street)
+   and the top candidate is not of that OSM class/type. Example: “Stazione Porta
+   Garibaldi, Milano, Italia” returns only companies (Samsung, Amazon) on Nominatim;
+   the official name “Milano Porta Garibaldi” returns the station.
+3. *same_name* / *ambiguous* — another candidate more than 250 m from the top one is
+   also of the named kind (e.g. Via Roma in Sesto San Giovanni, Cinisello Balsamo and
+   Legnano: none is in Milano municipality, and the note says so), or, for a query
+   naming no kind, any candidate lies more than 250 m away.
+
+Otherwise the top candidate is preselected: a single result, several map objects of
+the same place within 250 m, or the only cluster of the named kind (other results of
+another kind are far weaker). Preselection is a suggestion shown for review. `route_confirm_plan(plan_id, expected_revision, choices, skip)` applies
 origin, stops and end policy atomically in one revision; it refuses unresolved
 ambiguous/no-match items, candidates from another item, expired plans, another
 profile's plans, and plans made for an older revision (HTTP 409), writing nothing.
@@ -103,8 +121,8 @@ Requests have time and response-size limits. Snaps over 250 metres are refused b
 ## Place resolution and public-provider policy
 
 Give Hermes a list of locations and an explicit region (for example Milano, Italia).
-`route_search_locations(query, region)` returns at most five unverified map candidates
-with display labels, coordinates, opaque candidate IDs and uncertainty. It **never**
+`route_search_locations(query, region)` returns at most eight unverified map candidates,
+ranked near the route, with display labels, OSM kind, locality, distance, coordinates, opaque candidate IDs and uncertainty. It **never**
 chooses a match, even for a single result (batch plans may pre-fill an unambiguous
 match for review; nothing is applied without confirmation). Ask the user which candidate they mean;
 refine region/query when names are duplicated or no match is suitable. There is no
@@ -133,13 +151,29 @@ The provider also sees the request IP. Geocoding data © OpenStreetMap contribut
 (ODbL), via Nominatim. These are map matches, not guaranteed accessible entrances;
 road snaps can still be refused. No fabricated or straight-line fallback is used.
 
+### Proximity and ranking
+
+When the route has an origin (or, failing that, stops), searches send Nominatim a
+`viewbox` of ±0.25° latitude (about ±28 km) around it with `bounded=0`: a preference,
+not a filter, so distant places can still be found. The box centre is rounded to
+0.01° (about 1 km), so the provider learns an approximate area; the disclosure under
+the search fields and in each result says so. Without an origin no area is sent.
+Candidates are re-ranked locally: Nominatim `importance` + 0.5 when the OSM class/type
+matches the kind the query names − distance to the nearest route point / 20 km (ties
+keep the provider order). Every candidate shows its OSM kind (railway station, street,
+company, place of worship, …), locality and distance from the start (or nearest stop),
+and is flagged when more than 15 km from all route points. Offline tests use real
+Nominatim responses captured with dates and exact parameters in
+`tests/fixtures/nominatim/` (re-capture deliberately with `capture.py`); set
+`ROUTING_LIVE_GEOCODER=1` to also run the live check against the public service.
+
 Requests use a descriptive plugin User-Agent, no retries, a 15-second socket timeout,
-a 256-KiB response limit and five-result limit. A shared OS-user file lock paces all
+a 256-KiB response limit and eight-result limit. A shared OS-user file lock paces all
 plugin processes, service instances and profiles to at most one request per second
 (with at least 1.05 seconds after each request completes). This does not coordinate
 separate computers/users behind one IP: do not deploy multiple such installations
 against the public endpoint as an aggregate service. Cache entries use exact
-provider URL/query/region keys in the profile database and expire after 24 hours;
+provider URL/query/region/viewbox keys in the profile database and expire after 24 hours;
 there are at most 256 entries and 1280 pending candidate records. Expired records
 are pruned on search (not by a background worker); eviction can require re-search.
 Search queries, candidates and route locations persist in that private database.

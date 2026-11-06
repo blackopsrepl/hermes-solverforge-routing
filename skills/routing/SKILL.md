@@ -36,10 +36,15 @@ searches every place (shared one-request-per-second pacing, 24-hour profile cach
 stores one pending plan and writes nothing. origin may be a place query, explicit
 coordinates (a shared pin) or omitted to keep the current origin. round_trip=true
 returns home and clears the endpoint; an endpoint disables return home; omit both to
-keep the current end policy. Show every item with labels and [longitude, latitude]:
-preselected (the search found a single place, or several map objects within 250 m;
-still only a suggestion), needs_choice (list candidates, ask), no_match or
-search_failed (offer to skip or refine). The Desktop Route page and ::route{} card
+keep the current end policy. Searches prefer places near the start and stops (an
+approximate area is sent to the geocoder). Show every item with labels, kind,
+locality, distance from start and [longitude, latitude]: preselected (clearly best:
+a single place or co-located map objects, of the kind the query names, within 15 km
+of the route; still only a suggestion), needs_choice (read item.note to the user:
+far = flagged far from the other stops, kind_mismatch = e.g. "Stazione …" found no
+station, refine with the official name; same_name = same street in several towns,
+ask which), no_match or search_failed (offer to skip or refine). Never pick a far,
+wrong-kind or same-name candidate for the user. The Desktop Route page and ::route{} card
 show the same plan with one Add button. Only after the user chose, call
 route_confirm_plan(plan_id, expected_revision=plan.base_revision, choices=[{index,
 candidate_id}], skip=[indexes]); it adds everything in one revision. Refusals

@@ -29,6 +29,8 @@ spec.loader.exec_module(api)
 package = api._package()
 package.data_dir = lambda: ARTIFACTS / 'profile'
 api._config = lambda key, default=None: str(ENGINE) if key == 'binary' else default
+providers = importlib.import_module('.providers', package.__name__)
+DARSENA = [9.1772, 45.4525]  # Darsena basin, Milano (public landmark coordinates)
 app = FastAPI()
 app.include_router(api.router, prefix='/api')
 
@@ -86,13 +88,23 @@ try:
             assert current()['revision'] == before  # selection alone must not write
             return confirm()
         searches = []
-        def named_place(query, action):
+        # Empty query: a neutral disclosure, never an empty quoted string.
+        hint = page.get_by_text('Search sends the place and region you type', exact=False)
+        expect(hint).to_be_visible()
+        assert '“”' not in page.locator('body').inner_text()
+        hint_path = ARTIFACTS / 'search-empty-hint.png'
+        page.get_by_role('heading', name='Find an address or place', exact=True).locator('..').screenshot(path=str(hint_path))
+        screenshots.append(str(hint_path))
+        chosen_places = []
+        def named_place(query, action, wanted, why):
+            """Search, then choose the candidate that `wanted` accepts, never simply the first."""
             before = current()['revision']
             count = len([r for r in responses if '/actions/search_locations' in r['url']])
             page.get_by_label('Place or address', exact=True).fill(query)
             page.get_by_label('Region context', exact=True).fill('Milano, Italia')
             page.wait_for_timeout(150)
             assert count == len([r for r in responses if '/actions/search_locations' in r['url']]), 'typing must not search'
+            expect(page.get_by_text(f'Search sends exactly “{query}, Milano, Italia”', exact=False)).to_be_visible()
             with page.expect_response(lambda r:'/actions/search_locations' in r.url) as response:
                 page.get_by_role('button',name='Search',exact=True).click()
             result = response.value.json()
@@ -100,8 +112,17 @@ try:
             assert result['candidates'], result
             searches.append(result)
             expect(page.get_by_role('radio').first).to_be_visible()
-            assert not page.get_by_role('radio').first.is_checked(), 'no automatic choice'
-            page.get_by_role('radio').first.check()
+            assert not any(page.get_by_role('radio').nth(i).is_checked() for i in range(page.get_by_role('radio').count())), 'no automatic choice'
+            matching = [i for i, c in enumerate(result['candidates']) if wanted(c)]
+            assert matching, f'no candidate is {why}: {[(c["kind"], c["label"]) for c in result["candidates"]]}'
+            index = matching[0]
+            candidate = result['candidates'][index]
+            assert not candidate['far'], candidate
+            expect(page.get_by_text(candidate['kind'] + ' · ', exact=False).first).to_be_visible()
+            page.get_by_role('radio').nth(index).check()
+            chosen_places.append({'query': query, 'why': why, 'label': candidate['label'], 'kind': candidate['kind'],
+                                  'locality': candidate['locality'], 'distance_from_start_m': candidate['distance_from_start_m'],
+                                  'rank': index})
             assert current()['revision'] == before
             path = ARTIFACTS / ('search-' + query.replace(' ', '-') + '.png')
             page.screenshot(path=str(path),full_page=True)
@@ -109,9 +130,11 @@ try:
             page.get_by_role('button',name=action,exact=True).click()
             assert current()['revision'] == before
             return confirm()
-        named_place('Milano Centrale', 'Use as origin')
-        first = named_place('Duomo di Milano', 'Add named stop')['state']['stops'][0]['id']
-        second = named_place('Castello Sforzesco', 'Add named stop')['state']['stops'][1]['id']
+        named_place('Milano Centrale', 'Use as origin', lambda c: c['kind'] == 'railway station' and 'Milano Centrale' in c['label'], 'the railway station')
+        # From here on the route has an origin: searches carry the rounded viewbox.
+        first = named_place('Duomo di Milano', 'Add named stop', lambda c: c['label'].startswith('Duomo di Milano'), 'the cathedral')['state']['stops'][0]['id']
+        assert searches[-1]['viewbox'], 'origin set: search must be biased toward it'
+        second = named_place('Castello Sforzesco', 'Add named stop', lambda c: c['label'].startswith('Castello Sforzesco'), 'the castle')['state']['stops'][1]['id']
         page.get_by_role('button',name='Set next',exact=True).nth(1).click()
         assert confirm()['state']['next_id'] == second
         page.get_by_role('button',name='Solve road route',exact=True).click()
@@ -229,7 +252,7 @@ try:
         expect(page.get_by_label('Before stop',exact=True)).to_be_visible()
         shot('route-constraints.png')
         page.get_by_text('Constraints · 0 order locks · next stop fixed',exact=True).click()
-        repaired = named_place('Teatro alla Scala', 'Add named stop')
+        repaired = named_place('Teatro alla Scala', 'Add named stop', lambda c: c['label'].startswith('Teatro alla Scala'), 'the opera house')
         assert repaired['state']['solution'] is None
         assert len(repaired['state']['stops']) == 3
         page.get_by_role('button',name='Solve road route',exact=True).click()
@@ -237,7 +260,7 @@ try:
         assert len(repaired['state']['solution']['remaining_order']) == 3
         assert repaired['state']['solution']['remaining_order'][0] == second
         assert repaired['state']['solution']['geometry']['coordinates']
-        (ARTIFACTS/'geocoding-evidence.json').write_text(json.dumps({'searches':searches,'repaired':repaired},indent=2,ensure_ascii=False))
+        (ARTIFACTS/'geocoding-evidence.json').write_text(json.dumps({'searches':searches,'chosen':chosen_places,'repaired':repaired},indent=2,ensure_ascii=False))
         repair = repaired['state']['solution']['repair']
         assert repair and [a['title'] for a in repair['added']] and 'Teatro alla Scala' in repair['added'][0]['title'], repair
         expect(page.get_by_text('What changed since the last route', exact=True)).to_be_visible()
@@ -279,21 +302,78 @@ try:
         page.set_viewport_size({'width':1280,'height':1100})
         pin = {'title': 'Shared location (shared ' + time.strftime('%H:%M') + ')', 'coordinates': [9.2045, 45.4862]}
         places = ['Darsena Milano', 'Arco della Pace', 'Basilica di Sant\'Eustorgio', 'Stazione Porta Garibaldi', 'Via Roma']
-        planned = page.request.post(f'http://127.0.0.1:{port}/api/actions/plan_places', data={'places':[{'query':q} for q in places],'region':'Milano, Italia','origin':pin}).json()
-        assert planned['ok'] and planned['written'] is False, planned
-        plan = planned['plan']
+        def plan_places(names):
+            planned = page.request.post(f'http://127.0.0.1:{port}/api/actions/plan_places', data={'places':[{'query':q} for q in names],'region':'Milano, Italia','origin':pin}).json()
+            assert planned['ok'] and planned['written'] is False, planned
+            return planned['plan']
+        def by_query(plan, query):
+            return next(i for i in plan['items'] if i['query'] == query)
+        def preselected(item):
+            return next(c for c in item['candidates'] if c['candidate_id'] == item['preselected'])
+        # First plan, exactly the names of the earlier defect report.
+        plan = plan_places(places)
+        assert all(i['viewbox'] for i in plan['items'] if i['role'] == 'stop'), 'pin origin: every search is biased toward it'
+        station = by_query(plan, 'Stazione Porta Garibaldi')
+        # OSM has no object matching this phrasing; Nominatim returns companies. Never preselect them.
+        assert station['status'] == 'needs_choice' and station['reason'] == 'kind_mismatch' and station['preselected'] is None, station
+        assert not any(c['kind'] == 'railway station' for c in station['candidates'])
+        via_roma = by_query(plan, 'Via Roma')
+        assert via_roma['status'] == 'needs_choice' and via_roma['reason'] == 'same_name', via_roma
+        # OSM has no Via Roma inside Milano municipality; the plan must say so, not pick one.
+        assert 'none in Milano' in via_roma['note'] and not any(c['locality'] == 'Milano' for c in via_roma['candidates'])
+        page.goto(f'http://127.0.0.1:{port}/?card=1')
+        expect(page.get_by_text(station['note'], exact=True)).to_be_visible()
+        expect(page.get_by_text(via_roma['note'], exact=True)).to_be_visible()
+        expect(page.get_by_text('company · Milano · ', exact=False).first).to_be_visible()
+        if any(c['far'] for c in via_roma['candidates']):
+            expect(page.get_by_text('⚠ far from your other stops', exact=False).first).to_be_visible()
+        shot_first = ARTIFACTS / 'card-plan-needs-choice.png'
+        page.screenshot(path=str(shot_first), full_page=True)
+        screenshots.append(str(shot_first))
+        # The person refines the station to its official name and plans again (others come from cache).
+        places = [('Milano Porta Garibaldi' if q == 'Stazione Porta Garibaldi' else q) for q in places]
+        first_plan = plan
+        plan = plan_places(places)
+        assert all(i['cached'] for i in plan['items'] if i['role'] == 'stop' and i['query'] != 'Milano Porta Garibaldi')
         assert current()['revision'] == 0 and current()['pending_plan']['plan_id'] == plan['plan_id']
+        expected = {  # deliberate choices: query -> (accept candidate, why)
+            'Darsena Milano': (lambda c: c['locality'] == 'Milano' and providers.distance_m(c['coordinates'], DARSENA) < 300, 'at the Darsena basin'),
+            'Arco della Pace': (lambda c: c['label'].startswith('Arco della Pace') and c['kind'] == 'building', 'the arch itself'),
+            "Basilica di Sant'Eustorgio": (lambda c: c['label'].startswith("Basilica di Sant'Eustorgio"), 'the basilica'),
+            'Milano Porta Garibaldi': (lambda c: c['kind'] == 'railway station' and 'Milano Porta Garibaldi' in c['label'], 'the railway station'),
+            # No Via Roma exists in Milano municipality: take the nearest one, never a far one.
+            'Via Roma': (lambda c: c['kind'] == 'street' and not c['far'] and c['locality'] != 'Legnano' and c['distance_from_start_m'] < 10000, 'the nearest Via Roma (no far one)'),
+        }
         page.goto(f'http://127.0.0.1:{port}/?card=1')
         expect(page.get_by_role('heading', name='Planned places · nothing added yet', exact=True)).to_be_visible()
         expect(page.get_by_text('Read-only current route', exact=False)).to_be_visible()
+        decisions = []
         for item in plan['items']:
-            if item['status'] == 'needs_choice':
-                page.locator(f"input[name='plan-{plan['plan_id']}-{item['index']}']").first.check()
+            if item['role'] != 'stop':
+                continue
+            wanted, why = expected[item['query']]
+            if item['status'] == 'preselected':
+                assert wanted(preselected(item)), (item['query'], preselected(item)['label'])
+                choice = preselected(item)
+            else:
+                assert item['status'] == 'needs_choice', item
+                matching = [k for k, c in enumerate(item['candidates']) if wanted(c)]
+                assert matching, (item['query'], [(c['kind'], c['locality'], c['label']) for c in item['candidates']])
+                choice = item['candidates'][matching[0]]
+                radio = page.locator(f"input[name='plan-{plan['plan_id']}-{item['index']}']").nth(matching[0])
+                assert not radio.is_checked()
+                radio.check()
+            decisions.append({'query': item['query'], 'status': item['status'], 'reason': item['reason'], 'why': why,
+                              'label': choice['label'], 'kind': choice['kind'], 'locality': choice['locality'],
+                              'distance_from_start_m': choice['distance_from_start_m'], 'far': choice['far']})
+        assert by_query(plan, 'Milano Porta Garibaldi')['status'] == 'preselected'
+        assert all(not d['far'] for d in decisions)
         shot_card = ARTIFACTS / 'card-pending-plan.png'
         page.screenshot(path=str(shot_card), full_page=True)
         screenshots.append(str(shot_card))
         assert current()['revision'] == 0, 'choosing must not write'
         using = [i for i in plan['items'] if i['status'] in ('supplied','preselected','needs_choice')]
+        assert len(using) == len(plan['items']), 'every place resolved deliberately'
         page.get_by_role('button', name=f"Add {len(using)} place{'s' if len(using) != 1 else ''} in one change", exact=True).click()
         assert current()['revision'] == 0
         applied = confirm()
@@ -304,10 +384,14 @@ try:
         page.get_by_role('button',name='Solve road route',exact=True).click()
         batch_solved = confirm()
         comparison = batch_solved['state']['solution']['comparison']
+        solution = batch_solved['state']['solution']
+        # Recomputed claim on deliberately chosen, nearby places only.
+        assert all(providers.distance_m(s['coordinates'], pin['coordinates']) < 15000 for s in batch_solved['state']['stops'])
+        assert comparison['savings_seconds'] == comparison['given_duration_seconds'] - solution['duration_seconds'], comparison
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
             expect(page.get_by_text(comparison['message'], exact=True)).to_be_visible()
-        evidence['batch'] = {'plan': plan, 'applied_revision': applied['revision'], 'comparison': comparison,
+        evidence['batch'] = {'first_plan': first_plan, 'plan': plan, 'decisions': decisions, 'applied_revision': applied['revision'], 'comparison': comparison,
                              'navigation': batch_solved['navigation']}
         shot('batch-solved.png')
         page.get_by_role('heading', name='Navigate with your maps app', exact=True).locator('..').screenshot(path=str(ARTIFACTS / 'batch-handoff.png'))

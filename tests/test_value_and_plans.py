@@ -31,8 +31,8 @@ class Geocoder:
     """Synthetic offline geocoder with fixed answers; records every call."""
     url = "https://geocoder.invalid/search"
     answers = {
-        "Duomo": [{"label": "Duomo di Milano", "coordinates": [9.1919, 45.4642]},
-                  {"label": "Piazza del Duomo", "coordinates": [9.1906, 45.4641]}],
+        "Duomo": [{"label": "Duomo di Milano", "coordinates": [9.1919, 45.4642], "importance": 0.6},
+                  {"label": "Piazza del Duomo", "coordinates": [9.1906, 45.4641], "importance": 0.3}],
         "San Marco": [{"label": "San Marco, Milano", "coordinates": [9.188, 45.478]},
                       {"label": "San Marco, Venezia", "coordinates": [12.34, 45.43]}],
         "Castello": [{"label": "Castello Sforzesco", "coordinates": [9.1795, 45.4705]}],
@@ -40,7 +40,7 @@ class Geocoder:
     }
     def __init__(self):
         self.calls = []
-    def search(self, query, region):
+    def search(self, query, region, viewbox=None):
         self.calls.append((query, region))
         return self.answers[query]
 
@@ -141,7 +141,8 @@ def test_repair_diff_position_changes(service):
 
 
 def test_plan_writes_nothing_then_confirm_applies_atomically(service):
-    state = build(service, [])
+    # Home near the synthetic Milan answers: proximity rules see nothing far.
+    state = service.set_origin({"title": "Home", "coordinates": [9.18, 45.47]}, expected_revision=0)
     before = service.get_route()
     plan = service.plan_places([{"query": "Duomo"}, {"query": "San Marco"}, {"query": "Castello"}, {"query": "Nowhere"}],
                                region="Milano", round_trip=True)

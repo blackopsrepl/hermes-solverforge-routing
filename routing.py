@@ -259,7 +259,10 @@ class RouteService:
         return self.planner.confirm(plan_id, list(choices), list(skip), expected_revision, apply)
 
     def search_locations(self, query: str, region: str = "") -> dict:
-        return self.locations.search(query, region)
+        """Search near the current route: its origin and unvisited stops bias and rank results."""
+        state = self.store.read()
+        return self.locations.search(query, region, origin=state["origin"]["coordinates"] if state["origin"] else None,
+                                     stops=[s["coordinates"] for s in state["stops"] if not s.get("visited")])
 
     def confirm_location(self, candidate_id: str, role: str, *, expected_revision: int) -> dict:
         if type(expected_revision) is not int or expected_revision < 0:
