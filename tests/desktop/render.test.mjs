@@ -26,7 +26,7 @@ test('exact public SDK surfaces, no app bypasses',()=>{
 })
 test('map first, then the itinerary in plain words; no forms',()=>{
  const html=renderPage({data:data(solution),dataUpdatedAt:1})
- for(const text of ['Route map','Route','2 min · 1.2 km','1 stop · back to start','Current supplied origin','Library']) assert.ok(html.includes(text),text)
+ for(const text of ['Route map','Route','2 min · 1.2 km','1 stop · round trip','Current supplied origin','Library']) assert.ok(html.includes(text),text)
  assert.ok(html.includes(encodeURIComponent(data().map_document)))
  assert.ok(!/<input|<select|<form|<textarea/.test(html),'the route is edited in chat, not in a form')
  const visible=html.replace(/<[^>]*>/g,' ')

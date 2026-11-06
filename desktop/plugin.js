@@ -108,7 +108,7 @@ function RoutingSurface({ compact = false, scope }) {
   const summary = fresh
     ? jsxs('div',{children:[
         jsx('div',{style:{fontSize:22,fontWeight:700,letterSpacing:'-.3px'},children:`${minutes(solution.road_duration_seconds)} · ${km(solution.distance_m)}`}),
-        paragraph(`${order.length} stop${order.length===1?'':'s'}${state.round_trip?' · back to start':''}`),
+        paragraph(`${order.length} stop${order.length===1?'':'s'} · ${state.round_trip?'round trip':state.endpoint?'ends there':'one way'}`),
         solution.comparison?.message ? jsx('div',{style:{fontWeight:600,color:'var(--ui-accent)'},children:solution.comparison.message}) : null]})
     : empty ? null
     : jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8,alignItems:'flex-start'},children:[
