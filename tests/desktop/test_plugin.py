@@ -38,6 +38,8 @@ def test_registration_is_lazy_and_exact(monkeypatch):
         def __init__(self): self.tools = []; self.skills = []
         def register_tool(self, **kw): self.tools.append(kw)
         def register_skill(self, *args): self.skills.append(args)
+        def register_command(self, name, handler, **kw): self.command = name
+        def register_cli_command(self, **kw): self.cli = kw['name']
         def get_config(self, key, default=None): return default
     ctx = Context()
     pkg.register(ctx)
@@ -46,6 +48,7 @@ def test_registration_is_lazy_and_exact(monkeypatch):
     assert {t['name'] for t in ctx.tools} == set(manifest['provides_tools'])
     assert manifest['capabilities'] == [] and manifest['provides_hooks'] == []
     assert ctx.skills[0][0] == 'routing'
+    assert ctx.command == 'routing' and ctx.cli == 'solverforge-routing'
 
 
 def test_dashboard_manifest_mounts_the_rest_backend():
