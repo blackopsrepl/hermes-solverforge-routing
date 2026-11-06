@@ -1,6 +1,6 @@
 manifest_version: 2
 name: solverforge-routing
-version: 0.2.0
+version: 0.2.1
 label: SolverForge Routing
 description: Personal single-vehicle driving itineraries from searched places, batch plans, shared pins or coordinates. Explicit searches send query and region to Nominatim; solving routes on OpenStreetMap roads locally with solverforge-maps (the first solve in a new area downloads that area from Overpass); best-found estimates with honest savings, repair diffs and Google/Apple/OSM handoff links (opening one sends stops to that provider). Not live traffic.
 author: blackopsrepl

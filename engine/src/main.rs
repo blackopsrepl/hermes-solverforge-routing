@@ -3,8 +3,8 @@ mod domain;
 use serde::{Deserialize, Serialize};
 use solverforge::{prelude::HardSoftScore, SolverEvent, SolverManager};
 use solverforge_maps::{
-    BoundingBox, Coord, NetworkConfig, NetworkRef, RoadNetwork, SnappedCoord, StreetRun,
-    UNREACHABLE,
+    BoundingBox, Coord, NetworkConfig, NetworkRef, RoadNetwork, SnapAccess, SnappedCoord,
+    StreetRun, UNREACHABLE,
 };
 use std::{
     collections::HashSet,
@@ -253,7 +253,32 @@ fn load_roads(runtime: &tokio::runtime::Runtime, request: &Request) -> Result<Ro
     let network = runtime
         .block_on(RoadNetwork::load_or_fetch(&bbox, &config, None))
         .map_err(|e| fail("road_network", e.to_string()))?;
-    let table = runtime.block_on(network.compute_matrix(&coords, None));
+    // Snapping knows each point's role: a round trip enters and leaves the
+    // origin and every stop; a one-way trip may finish at the last stop or a
+    // fixed end, so its stops only need arriving. A stop stranded on a node
+    // the itinerary cannot traverse otherwise fails to order at all.
+    let destination_index = request.destination.unwrap_or(request.points.len() - 1);
+    let access: Vec<SnapAccess> = request
+        .points
+        .iter()
+        .enumerate()
+        .map(|(index, _)| {
+            if index == request.origin {
+                if request.round_trip {
+                    SnapAccess::Both
+                } else {
+                    SnapAccess::Outgoing
+                }
+            } else if index == destination_index && !request.round_trip {
+                SnapAccess::Incoming
+            } else if request.round_trip {
+                SnapAccess::Both
+            } else {
+                SnapAccess::Incoming
+            }
+        })
+        .collect();
+    let table = runtime.block_on(network.compute_matrix_with_access(&coords, &access, None));
     let snaps = table.locations().to_vec();
     if let Some(far) = snaps
         .iter()

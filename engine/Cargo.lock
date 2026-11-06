@@ -1209,9 +1209,9 @@ dependencies = [
 
 [[package]]
 name = "solverforge-maps"
-version = "2.3.0"
+version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58b0eec8d1880e64882e1ac50805a2392d77c1c0e668c49bc37495a78a3f4b71"
+checksum = "c9bf26f306b0364814620c0f4a6c0327b66f2167a01e0c35f813eb8735757b42"
 dependencies = [
  "rayon",
  "reqwest",
@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "solverforge-routing"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
