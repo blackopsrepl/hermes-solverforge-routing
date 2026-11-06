@@ -50,8 +50,6 @@ This is a personal, single-vehicle trip planner, not fleet dispatch. It does not
 
 **Roads, not straight lines.** [solverforge-maps](https://github.com/SolverForge/solverforge-maps) builds a road graph from OpenStreetMap. The same graph supplies the travel-time matrix and each hop's geometry, so the map never has to guess where a visit begins or ends.
 
-**Direction you can read.** Each hop is a centered road ribbon with travel-direction arrows painted on it, SimCity-style. Where the route uses the same road in both directions, both arrow streams share the ribbon in opposite lanes. The paint is screen-space: the same size at every zoom, clipped inside the ribbon. The rendering lives in solverforge-ui's map module; this plugin only hands it the ordered hops.
-
 **Your rules kept intact.** Every remaining stop must be visited exactly once. A fixed next visit, a fixed destination and “before” rules are checked independently before a solution can replace the current route. An older solve cannot overwrite an edit made while it was running.
 
 **An honest comparison.** When the result saves at least a whole minute against the order you gave, the pane says how much. Both orders use the same road matrix and the same start/end convention. If your original order breaks a lock, no saving is claimed against it. These are best-found estimates, not a claim of a proven global optimum.
@@ -69,6 +67,8 @@ This is a personal, single-vehicle trip planner, not fleet dispatch. It does not
 This is not turn-by-turn navigation. There is no live traffic, road-closure feed, arrival detection or automatic rerouting as you drive.
 
 The current road model handles one-way roads, roundabouts, motorway links and basic car-access tags. It does **not** yet enforce turn restrictions, barriers or conditional access. It also does not distinguish destination-only streets from through streets. Check the route in your navigation app and follow signs and current road conditions.
+
+Road direction arrows are not shipped yet. The current map uses numbered stops and hop colours; arrows are being developed in solverforge-ui rather than patched into this plugin.
 
 ## Places and shared locations
 

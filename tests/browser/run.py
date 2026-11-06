@@ -132,16 +132,13 @@ try:
         assert result['state']['solution']['geometry']['coordinates']
         expect(page.get_by_role('heading', name='Navigate', exact=True)).to_be_visible()
         frame = page.frame_locator('iframe')
-        # One composite scene: a body per hop plus travel-direction arrows on it.
+        # One drawn line per hop, exactly the engine's legs.
         legs = result['state']['solution']['legs']
         for _ in range(10):  # the pane polls every 4 s; wait for this document
-            bodies = frame.locator('.sf-map-paint [data-pass="all-bodies"] path')
-            arrows = frame.locator('.sf-map-paint [data-pass="all-arrows"] path')
-            if page.locator('iframe').count() and bodies.count() == len(legs) and arrows.count() > 0:
+            if page.locator('iframe').count() and frame.locator('.leaflet-overlay-pane path').count() == len(legs):
                 break
             page.wait_for_timeout(800)
-        assert frame.locator('.sf-map-paint [data-pass="all-bodies"] path').count() == len(legs), (len(legs), errors)
-        assert frame.locator('.sf-map-paint [data-pass="all-arrows"] path').count() > 0, ('no direction paint', errors)
+        assert frame.locator('.leaflet-overlay-pane path').count() == len(legs), (len(legs), errors)
         expect(frame.locator('.sf-marker-stop')).to_have_count(3)
         assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'map or attribution clipped'
         assert 'OpenStreetMap contributors' in frame.locator('.leaflet-control-attribution').inner_text(), errors
@@ -398,8 +395,7 @@ try:
         assert all(geo.distance_m(s['coordinates'], pin['coordinates']) < 15000 for s in batch_solved['state']['stops'])
         assert comparison['savings_seconds'] == comparison['given_duration_seconds'] - solution['duration_seconds'], comparison
         assert len(solution['legs']) >= 4, solution['legs']  # round trip: origin, stops, return home
-        assert frame.locator('.sf-map-paint [data-pass="all-bodies"] path').count() == len(solution['legs'])
-        assert frame.locator('.sf-map-paint [data-pass="all-arrows"] path').count() > 0
+        assert frame.locator('.leaflet-overlay-pane path').count() == len(solution['legs'])
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
             expect(page.get_by_text(comparison['message'], exact=True)).to_be_visible()

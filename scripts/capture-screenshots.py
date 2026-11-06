@@ -102,8 +102,7 @@ def main() -> None:
                     print('Guest errors:', errors, flush=True)
                     print('Guest body:', frame.locator('body').inner_text(), flush=True)
                     raise
-                expect(frame.locator('.sf-map-paint [data-pass="all-bodies"] path')).to_have_count(len(solved['solution']['legs']))
-                expect(frame.locator('.sf-map-paint [data-pass="all-arrows"] path').first).to_be_visible(timeout=30000)
+                expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(len(solved['solution']['legs']))
                 page.wait_for_timeout(1500)
                 nav = page.get_by_role('heading', name='Navigate', exact=True).locator('..')
                 pane_box, nav_box = page.locator('#pane').bounding_box(), nav.bounding_box()

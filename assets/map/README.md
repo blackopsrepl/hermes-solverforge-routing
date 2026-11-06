@@ -1,8 +1,8 @@
 # Map guest source dependencies
 
 `sf-map.js` and `sf-map.css` are unchanged copies from SolverForge UI commit
-`c0381e7489131f7a42b40533ca32efd3221ad733`, `static/sf/modules/`:
-https://github.com/SolverForge/solverforge-ui/tree/c0381e7489131f7a42b40533ca32efd3221ad733
+`504c2ce1c08a986005946cb7936a4cff87302613`, `static/sf/modules/`:
+https://github.com/SolverForge/solverforge-ui/tree/504c2ce1c08a986005946cb7936a4cff87302613
 Apache-2.0 terms are in `solverforge-ui-LICENSE`.
 
 `leaflet.js` and `leaflet.css` are the unchanged vendored **Leaflet 1.9.4**
