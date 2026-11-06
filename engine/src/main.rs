@@ -1,0 +1,272 @@
+mod domain;
+
+use serde::{Deserialize, Serialize};
+use solverforge::{prelude::HardSoftScore, SolverEvent, SolverManager};
+use std::{
+    collections::HashSet,
+    io::{self, Read},
+    sync::Arc,
+};
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Hash)]
+#[serde(deny_unknown_fields)]
+struct Input {
+    matrix: Vec<Vec<Option<i64>>>,
+    stop_ids: Vec<String>,
+    origin: usize,
+    #[serde(default)]
+    destination: Option<usize>,
+    round_trip: bool,
+    #[serde(default)]
+    fixed_first: Option<usize>,
+    #[serde(default)]
+    precedence: Vec<[usize; 2]>,
+    solve_seconds: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct Problem {
+    input: Input,
+    mandatory: Vec<usize>,
+}
+
+type Result<T> = std::result::Result<T, Failure>;
+
+#[derive(Debug, Serialize)]
+struct Failure {
+    code: &'static str,
+    message: String,
+}
+fn fail(code: &'static str, message: impl Into<String>) -> Failure {
+    Failure {
+        code,
+        message: message.into(),
+    }
+}
+
+impl Problem {
+    fn endpoint(&self) -> Option<usize> {
+        if self.input.round_trip {
+            Some(self.input.origin)
+        } else {
+            self.input.destination
+        }
+    }
+
+    fn new(input: Input) -> Result<Self> {
+        let n = input.matrix.len();
+        let invalid = |s| fail("invalid_input", s);
+        if n == 0 || input.stop_ids.len() != n || input.matrix.iter().any(|r| r.len() != n) {
+            return Err(invalid(
+                "matrix must be nonempty, square and match stop_ids",
+            ));
+        }
+        if input.origin != 0 || input.destination.is_some_and(|d| d >= n) {
+            return Err(invalid("origin must be 0 and destination must be in range"));
+        }
+        if input.round_trip && input.destination.is_some_and(|d| d != input.origin) {
+            return Err(invalid("round_trip conflicts with a distinct destination"));
+        }
+        if input.solve_seconds == 0 || input.solve_seconds > 3600 {
+            return Err(invalid("solve_seconds must be in 1..=3600"));
+        }
+        if input.stop_ids.iter().collect::<HashSet<_>>().len() != n {
+            return Err(invalid("stop_ids must be unique"));
+        }
+        // Bound every possible route sum, including intermediate infeasible candidates.
+        let limit = i64::MAX / i64::try_from(n + 1).map_err(|_| invalid("matrix too large"))?;
+        if input
+            .matrix
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|&c| c < 0 || c > limit)
+        {
+            return Err(invalid(
+                "costs must be nonnegative and fit a signed 64-bit route sum",
+            ));
+        }
+        let mandatory: Vec<_> = (0..n)
+            .filter(|&i| i != input.origin && Some(i) != input.destination)
+            .collect();
+        if input.fixed_first.is_some_and(|f| !mandatory.contains(&f)) {
+            return Err(invalid("fixed_first must identify a mandatory visit"));
+        }
+        if input.precedence.iter().any(|&[a, b]| a >= n || b >= n) {
+            return Err(invalid("precedence index out of range"));
+        }
+        let p = Self { input, mandatory };
+        // Include endpoint and pinning rules when checking the strict ordering DAG.
+        let mut edges = p.input.precedence.clone();
+        for &v in &p.mandatory {
+            edges.push([p.input.origin, v]);
+            if let Some(end) = p.endpoint().filter(|&e| e != p.input.origin) {
+                edges.push([v, end]);
+            }
+            if let Some(first) = p.input.fixed_first.filter(|&f| f != v) {
+                edges.push([first, v]);
+            }
+        }
+        if let Some(end) = p.endpoint().filter(|&e| e != p.input.origin) {
+            edges.push([p.input.origin, end]);
+        }
+        let mut degrees = vec![0usize; n];
+        for &[_, b] in &edges {
+            degrees[b] += 1;
+        }
+        let mut ready: Vec<_> = (0..n).filter(|&v| degrees[v] == 0).collect();
+        let mut count = 0;
+        while let Some(v) = ready.pop() {
+            count += 1;
+            for &[a, b] in &edges {
+                if a == v {
+                    degrees[b] -= 1;
+                    if degrees[b] == 0 {
+                        ready.push(b);
+                    }
+                }
+            }
+        }
+        if count != n {
+            return Err(fail(
+                "impossible_constraints",
+                "precedence, endpoint or fixed_first rules form a cycle",
+            ));
+        }
+        Ok(p)
+    }
+
+    // Deliberately independent of the model's penalty functions and list representation.
+    fn validate(&self, order: &[usize]) -> Result<i64> {
+        let bad = || {
+            fail(
+                "no_feasible_route",
+                "no independently validated feasible route found within solve budget",
+            )
+        };
+        let endpoint = self.endpoint();
+        let repeated_origin = endpoint == Some(self.input.origin) && !self.mandatory.is_empty();
+        let expected_len = 1
+            + self.mandatory.len()
+            + usize::from(endpoint.is_some_and(|e| e != self.input.origin) || repeated_origin);
+        if order.len() != expected_len
+            || order.first() != Some(&self.input.origin)
+            || order.iter().any(|&i| i >= self.input.matrix.len())
+        {
+            return Err(bad());
+        }
+        if endpoint.is_some_and(|end| order.last() != Some(&end)) {
+            return Err(bad());
+        }
+        let body_end = order.len() - usize::from(expected_len > 1 && endpoint.is_some());
+        let actual: HashSet<_> = order[1..body_end].iter().copied().collect();
+        if actual != self.mandatory.iter().copied().collect() || actual.len() != body_end - 1 {
+            return Err(bad());
+        }
+        if self
+            .input
+            .fixed_first
+            .is_some_and(|f| order.get(1) != Some(&f))
+        {
+            return Err(bad());
+        }
+        for &[a, b] in &self.input.precedence {
+            match (
+                order.iter().position(|&v| v == a),
+                order.iter().position(|&v| v == b),
+            ) {
+                (Some(a), Some(b)) if a < b => {}
+                _ => return Err(bad()),
+            }
+        }
+        order.windows(2).try_fold(0i64, |sum, w| {
+            sum.checked_add(self.input.matrix[w[0]][w[1]].ok_or_else(bad)?)
+                .ok_or_else(bad)
+        })
+    }
+}
+
+#[derive(Serialize)]
+struct Output {
+    order: Vec<usize>,
+    duration_seconds: i64,
+    hard_feasible: bool,
+    optimal: bool,
+    score: String,
+}
+
+fn run() -> Result<Output> {
+    let mut text = String::new();
+    io::stdin()
+        .read_to_string(&mut text)
+        .map_err(|e| fail("input_error", e.to_string()))?;
+    let input = serde_json::from_str(&text).map_err(|e| fail("invalid_input", e.to_string()))?;
+    let p = Arc::new(Problem::new(input)?);
+    let plan = domain::Plan {
+        routes: vec![domain::Route {
+            id: 0,
+            visits: (0..p.mandatory.len()).collect(),
+            problem: p.clone(),
+        }],
+        visits: (0..p.mandatory.len())
+            .map(|id| domain::Visit { id })
+            .collect(),
+        score: None,
+        seconds: p.input.solve_seconds,
+    };
+    static MANAGER: SolverManager<domain::Plan> = SolverManager::new();
+    let (job, mut events) = MANAGER
+        .solve(plan)
+        .map_err(|e| fail("solver_error", e.to_string()))?;
+    let solution = loop {
+        match events.blocking_recv() {
+            Some(SolverEvent::Completed { solution, .. }) => break solution,
+            Some(SolverEvent::Failed { error, .. }) => {
+                return Err(fail("solver_error", error.to_string()))
+            }
+            Some(SolverEvent::Cancelled { .. }) | None => {
+                return Err(fail("solver_error", "solver ended without completion"))
+            }
+            _ => {}
+        }
+    };
+    MANAGER
+        .delete(job)
+        .map_err(|e| fail("solver_error", e.to_string()))?;
+    let order = solution.routes[0].order();
+    let duration_seconds = p.validate(&order)?;
+    let expected = HardSoftScore::of(0, -duration_seconds);
+    if solution.score != Some(expected) || solverforge::analyze(&solution).score != expected {
+        return Err(fail(
+            "score_mismatch",
+            "incremental score, full score and independently computed duration disagree",
+        ));
+    }
+    Ok(Output {
+        order,
+        duration_seconds,
+        hard_feasible: true,
+        optimal: false,
+        score: expected.to_string(),
+    })
+}
+
+fn main() {
+    // Keep failures machine-readable even if a dependency panics.
+    std::panic::set_hook(Box::new(|_| {}));
+    let result = std::panic::catch_unwind(run)
+        .unwrap_or_else(|_| Err(fail("solver_error", "solver panicked")));
+    match result {
+        Ok(output) => println!(
+            "{}",
+            serde_json::to_string(&output).expect("output serialization")
+        ),
+        Err(error) => {
+            eprintln!(
+                "{}",
+                serde_json::to_string(&error).expect("error serialization")
+            );
+            std::process::exit(1);
+        }
+    }
+}
