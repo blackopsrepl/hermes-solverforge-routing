@@ -46,7 +46,8 @@ test('unsolved edits show stops and one Plan route action' ,()=>{
  const empty=data();empty.state.origin=null;empty.state.stops=[]
  const first=renderPage({data:empty})
  for(const text of ['Where do you start?','Not set yet','Add a start and a stop','Start here']) assert.ok(first.includes(text),text)
- assert.ok(!first.includes('Route map') && !first.includes('Preferences'),'no empty map, no preferences before a start')
+ assert.ok(first.includes('Route map'),'the map is always on the page')
+ assert.ok(!first.includes('Preferences'),'no preferences before a start')
  assert.ok(html.includes(encodeURIComponent(data().map_document)))
 })
 test('directive is read only, loading, errors, missing engine',()=>{
