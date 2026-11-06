@@ -40,7 +40,10 @@ def _call(action, body):
     result = package.RoutingTools(lambda: package.service(_config), qr=action == "current").call("route_" + action, body)
     if action == "current" and result["ok"]:
         from importlib import import_module
-        result["map_document"] = import_module(".map_document", package.__name__).map_document(result["state"])
+        documents = import_module(".map_document", package.__name__)
+        result["map_document"] = documents.map_document(result["state"])
+        solution = result["state"].get("solution")
+        result["street_runs"] = solution.get("street_runs", []) if solution else []
     code = 200 if result["ok"] else {"stale_revision": 409, "engine_missing": 503, "provider_error": 502, "engine_error": 502, "storage_error": 503}.get(result["error"]["code"], 400)
     return JSONResponse(result, status_code=code)
 
