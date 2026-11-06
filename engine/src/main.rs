@@ -342,16 +342,55 @@ fn solve(input: Input) -> Result<(Vec<usize>, i64, String)> {
     Ok((order, duration_seconds, expected.to_string()))
 }
 
+/// Reject cheap request/constraint errors before any cache or network work.
+fn validate_request(request: &Request) -> Result<()> {
+    let n = request.points.len();
+    if !(1..=100).contains(&n) || request.stop_ids.len() != n {
+        return Err(fail("invalid_input", "1..=100 points must match stop_ids"));
+    }
+    if !request.max_snap_m.is_finite() || !(1.0..=10000.0).contains(&request.max_snap_m) {
+        return Err(fail("invalid_input", "max_snap_m must be in 1..=10000"));
+    }
+    if request.cache_dir.trim().is_empty()
+        || request
+            .stop_ids
+            .iter()
+            .any(|s| s.is_empty() || s.len() > 1000)
+    {
+        return Err(fail(
+            "invalid_input",
+            "cache_dir and bounded stop_ids must be nonempty",
+        ));
+    }
+    for &[lng, lat] in &request.points {
+        Coord::try_new(lat, lng).map_err(|e| fail("invalid_input", e.to_string()))?;
+    }
+    // The same endpoint, visit and ordering validation as the real road problem.
+    Problem::new(Input {
+        matrix: vec![vec![Some(0); n]; n],
+        stop_ids: request.stop_ids.clone(),
+        origin: request.origin,
+        destination: request.destination,
+        round_trip: request.round_trip,
+        fixed_first: request.fixed_first,
+        precedence: request.precedence.clone(),
+        solve_seconds: request.solve_seconds,
+    })?;
+    Ok(())
+}
+
 fn run() -> Result<Output> {
     let mut text = String::new();
     io::stdin()
+        .take(1_000_001)
         .read_to_string(&mut text)
         .map_err(|e| fail("input_error", e.to_string()))?;
+    if text.len() > 1_000_000 {
+        return Err(fail("invalid_input", "request exceeds one million bytes"));
+    }
     let request: Request =
         serde_json::from_str(&text).map_err(|e| fail("invalid_input", e.to_string()))?;
-    if request.stop_ids.len() != request.points.len() {
-        return Err(fail("invalid_input", "points must match stop_ids"));
-    }
+    validate_request(&request)?;
     let runtime = tokio::runtime::Runtime::new().map_err(|e| fail("input_error", e.to_string()))?;
     let roads = load_roads(&runtime, &request)?;
     let (order, duration_seconds, score) = solve(Input {
@@ -377,6 +416,25 @@ fn run() -> Result<Output> {
 }
 
 fn main() {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if args == ["--version"] {
+        println!(
+            "{}",
+            serde_json::json!({"status": "ok", "data": {"version": env!("CARGO_PKG_VERSION")}})
+        );
+        return;
+    }
+    if !args.is_empty() {
+        eprintln!(
+            "{}",
+            serde_json::to_string(&fail(
+                "invalid_input",
+                "usage: solverforge-routing [--version]"
+            ))
+            .expect("error serialization")
+        );
+        std::process::exit(1);
+    }
     // Keep failures machine-readable even if a dependency panics.
     std::panic::set_hook(Box::new(|_| {}));
     let result = std::panic::catch_unwind(run)
