@@ -1,0 +1,60 @@
+name: plugin release
+
+# Publishes the plugin's own release for a vX.Y.Z tag. The plugin installs from the
+# tag itself (`hermes plugins install blackopsrepl/hermes-solverforge-routing`);
+# this release is where people read what changed and which engine it pins. It is
+# only created when the checksums pinned in engine_bin.py match the SHA256SUMS of
+# the engine release they point to.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+        with:
+          components: clippy, rustfmt
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Refuse unpinned engines before network or build
+        id: version
+        run: |
+          engine="$(python3 scripts/check-release.py "$GITHUB_REF_NAME")"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "engine=$engine" >> "$GITHUB_OUTPUT"
+          echo "engine_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/engine-v$engine" >> "$GITHUB_OUTPUT"
+          echo "readme_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/README.md" >> "$GITHUB_OUTPUT"
+      - name: Pinned checksums match the engine release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENGINE: ${{ steps.version.outputs.engine }}
+        run: |
+          gh release download "engine-v$ENGINE" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir .build/release
+          python3 scripts/check-release.py "$GITHUB_REF_NAME" --sums .build/release/SHA256SUMS
+      - name: Lint and tests
+        run: make lint test
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: SolverForge Routing ${{ steps.version.outputs.version }}
+          make_latest: "true"
+          body: |
+            ```sh
+            hermes plugins install blackopsrepl/hermes-solverforge-routing --enable
+            hermes solverforge-routing install
+            ```
+
+            The second command downloads [routing engine ${{ steps.version.outputs.engine }}](${{ steps.version.outputs.engine_url }})
+            for your platform and checks it against the SHA-256 pinned in this release.
+            See the [README](${{ steps.version.outputs.readme_url }}) to get started.
+          generate_release_notes: true

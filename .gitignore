@@ -7,3 +7,4 @@ engine/target/
 *.db-wal
 node_modules/
 dist/
+.build/
