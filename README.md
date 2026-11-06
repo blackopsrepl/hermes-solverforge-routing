@@ -50,6 +50,8 @@ This is a personal, single-vehicle trip planner, not fleet dispatch. It does not
 
 **Roads, not straight lines.** [solverforge-maps](https://github.com/SolverForge/solverforge-maps) builds a road graph from OpenStreetMap. The same graph supplies the travel-time matrix and each hop's geometry, so the map never has to guess where a visit begins or ends.
 
+**The map reads like your trip.** The leg you are driving is the bold line; the hops still ahead stay pale, and on a round trip the dashed amber line closes back to your amber start marker — direction stays legible where lines cross or share a road.
+
 **Your rules kept intact.** Every remaining stop must be visited exactly once. A fixed next visit, a fixed destination and “before” rules are checked independently before a solution can replace the current route. An older solve cannot overwrite an edit made while it was running.
 
 **An honest comparison.** When the result saves at least a whole minute against the order you gave, the pane says how much. Both orders use the same road matrix and the same start/end convention. If your original order breaks a lock, no saving is claimed against it. These are best-found estimates, not a claim of a proven global optimum.

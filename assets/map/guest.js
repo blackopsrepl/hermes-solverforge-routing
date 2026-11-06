@@ -28,17 +28,19 @@
     marker.getElement().setAttribute('title', text.textContent);
   });
   // One line per travel hop, exactly as the engine routed it on the road graph.
-  // A round trip's closing leg is dashed in amber: the way home is explicit,
-  // and the dash stays visible where it draws over the outbound line.
+  // Phase carries the direction: the leg being driven is the bold one, the
+  // upcoming hops recede, and a round trip's closing leg is dashed amber —
+  // the way home. Where lines cross or share a road, the bold line is the now.
   var LEG_COLORS = ['#1d4f9c', '#2e7cc4', '#63a4dd', '#9ec5e8'];
   var legs = data.legs || [];
   legs.forEach(function (leg, n) {
     var closing = data.round_trip && n === legs.length - 1;
+    var driving = n === 0;
     ctrl.drawRoute({
       points: leg.map(function (p) { return [p[1], p[0]]; }),
       color: closing ? '#b45309' : LEG_COLORS[n % LEG_COLORS.length],
-      weight: 5,
-      opacity: 1,
+      weight: driving ? 6 : 4,
+      opacity: closing ? 1 : (driving ? 1 : 0.55),
       dashArray: closing ? '6 8' : undefined,
     });
   });
