@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-ENGINE_VERSION = "0.2.1"
+ENGINE_VERSION = "0.2.2"
 REPO = "blackopsrepl/hermes-solverforge-routing"
 RELEASE_URL = f"https://github.com/{REPO}/releases/download/engine-v{ENGINE_VERSION}"
 # SHA-256 of each engine-v{ENGINE_VERSION} release asset, copied from the
