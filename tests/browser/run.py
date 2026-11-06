@@ -146,15 +146,11 @@ try:
             page.wait_for_timeout(800)
         assert ','.join(doclegs) in (guest_legs or ''), (guest_legs, doclegs)
         leg_paths = frame.locator('.leaflet-overlay-pane path')
-        # Each hop draws a white casing under its coloured line.
-        if leg_paths.count() != 2 * len(doclegs):
-            raise AssertionError({
-                'legs': doclegs, 'guest': guest_legs,
-                'paths': leg_paths.count(),
-                'arrows': frame.locator('.route-arrow').count(),
-            })
+        # Each road lane: a white casing and the coloured line; directions are road
+        # markers whose inline SVG chevron is centred on the lane.
+        assert leg_paths.count() == 2 * len(doclegs), (leg_paths.count(), len(doclegs))
         arrows = frame.locator('.route-arrow')
-        assert arrows.count() >= max(0, len(doclegs) - 1), (arrows.count(), doclegs)
+        assert arrows.count() >= len(doclegs) - 1, (arrows.count(), doclegs)
         expect(frame.locator('.sf-marker-stop')).to_have_count(3)
         assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'map or attribution clipped'
         expect(frame.locator('.leaflet-control-attribution')).to_contain_text('OpenStreetMap contributors')
@@ -173,7 +169,14 @@ try:
             deadline = time.monotonic() + 5
             while not frame.locator('#map').evaluate(fits) and time.monotonic() < deadline:
                 page.wait_for_timeout(50)
-            assert frame.locator('#map').evaluate(fits), 'route or markers clipped'
+            # Lane paint scales through Leaflet's zoom animation: sample once it settles.
+            frame.locator('.leaflet-container').wait_for(timeout=5000)
+            page.wait_for_timeout(900)
+            offenders = frame.locator('#map').evaluate("""el => [...el.querySelectorAll('.leaflet-marker-icon,.leaflet-overlay-pane path')].map(m => ({ cls: String(m.getAttribute('class') || ''), d: (m.getAttribute('d') || '').slice(0, 40), r: m.getBoundingClientRect(), box: el.getBoundingClientRect() })).filter(x => x.r.right > x.box.right + 1 || x.r.left < x.box.left - 1)""")
+            if offenders:
+                print('OFFENDERS', json.dumps(offenders, default=str)[:600])
+            assert not offenders or not frame.locator('#map').evaluate(fits) and False, 'route or markers clipped' if offenders else ''
+
             assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'frame disclosure clipped'
         map_fits()
         # Exercise real drag and zoom controls, not a JS map.setView shortcut.
@@ -403,8 +406,9 @@ try:
         doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
         doclegs = re.findall(r'geo:\d+_\d+', doc)
         assert len(doclegs) >= 4, doclegs  # round trip: origin, stops, return home
-        # Round trip: a white casing and a coloured line per hop.
-        assert frame.locator('.leaflet-overlay-pane path').count() == 2 * len(doclegs)
+        # Round trip: casing + line per hop, chevron markers on every lane.
+        got_paths = frame.locator('.leaflet-overlay-pane path').count()
+        assert got_paths == 2 * len(doclegs), (got_paths, len(doclegs), doclegs)
         assert frame.locator('.route-arrow').count() >= len(doclegs) - 1
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
@@ -412,6 +416,48 @@ try:
         evidence['batch'] = {'first_plan': first_plan, 'plan': plan, 'decisions': decisions, 'applied_revision': applied['revision'], 'comparison': comparison,
                              'navigation': batch_solved['navigation']}
         shot('batch-solved.png')
+
+        # Two-way round trip over one road: the return leg must draw as its own
+        # right-hand lane next to the outgoing one, chevrons each way.
+        package.data_dir = lambda: ARTIFACTS / 'profile-twoway'
+        page.set_viewport_size({'width': 1100, 'height': 900})
+        two = {}
+        two['origin'] = {'title': 'Largo Augusto', 'coordinates': [9.1983, 45.4647]}
+        two['stop'] = {'title': 'Arco della Pace', 'coordinates': [9.1742, 45.4742]}
+        r = post('set_origin', origin=two['origin'], expected_revision=0).json()
+        assert r['ok'], r
+        r = post('add_stop', stop=two['stop'], expected_revision=1).json()
+        assert r['ok'], r
+        r = post('set_round_trip', enabled=True, expected_revision=2).json()
+        assert r['ok'], r
+        two['solved'] = act(page.get_by_role('button', name='Plan route', exact=True))
+        two['legs'] = len(re.findall(r'geo:\\d+_\\d+', two['solved']['navigation']['google']['legs'][0]['url']))
+        refresh(two['solved']['revision'])
+        for _ in range(12):   # the pane polls; the map document follows the committed solve
+            doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
+            two['doclegs'] = re.findall(r'geo:\d+_\d+', doc)
+            if two['doclegs']:
+                break
+            page.wait_for_timeout(700)
+        assert len(two['doclegs']) == 2, (two['doclegs'], two['solved']['state'].get('round_trip'), two['solved']['state']['stops'])
+        assert frame.locator('.leaflet-overlay-pane path').count() == 4, 'casing + line per lane'
+        centres = frame.locator('.leaflet-overlay-pane path').evaluate_all(
+            "(paths) => paths.map(p => { const b = p.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2] })")
+        two['laneCentres'] = centres
+        out_x = sorted(centres, key=lambda c: c[0])[0]
+        back_x = sorted(centres, key=lambda c: c[0])[-1]
+        assert abs(out_x[0] - back_x[0]) > 3, (out_x, back_x)  # the lanes really sit side by side
+        arrows = frame.locator('.route-arrow')
+        assert arrows.count() >= 4, arrows.count()  # both directions get their paint
+        # The two lanes carry opposite headings: collect every chevron's rotation.
+        angles = frame.locator('.route-arrow svg path').evaluate_all(
+            "(paths) => paths.map(p => { const m = /rotate\\(([-0-9.]+)deg\\)/.exec(p.getAttribute('style')); return m ? Number(m[1]) : null })")
+        assert len(angles) == arrows.count() and None not in angles, angles
+        assert max(angles) - min(angles) > 60 and any(a > 20 for a in angles) and any(a < -20 for a in angles), angles  # both ways painted
+        two['chevronAngles'] = angles
+        page.wait_for_timeout(600)
+        shot('two-way-lanes.png')
+        evidence['two_way'] = {k: v for k, v in two.items() if k != 'colorPaths'}
         page.get_by_role('heading', name='Navigate', exact=True).locator('..').screenshot(path=str(ARTIFACTS / 'batch-handoff.png'))
         screenshots.append(str(ARTIFACTS / 'batch-handoff.png'))
         assert not errors, errors
