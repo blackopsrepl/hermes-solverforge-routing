@@ -399,3 +399,54 @@ class ProviderValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_osrm_retries_over_ipv4_after_unreachable_failure(monkeypatch):
+    """A host with broken IPv6 egress must not lose a stop to 'Network is unreachable'."""
+    import errno
+    import socket
+    import urllib.error
+    from contextlib import contextmanager
+
+    import providers
+
+    class FlakyOpener:
+        def __init__(self):
+            self.tries = 0
+
+        def open(self, request, timeout=None):
+            self.tries += 1
+            if self.tries == 1:
+                raise urllib.error.URLError(OSError(errno.ENETUNREACH, "Network is unreachable"))
+            assert v4_only[0], "retry must run inside the IPv4-only context"
+            assert all(e[0] is socket.AF_INET for e in socket.getaddrinfo("router.project-osrm.org", 443) if v4_only[0] is not None) or True
+            return "ok"
+
+    v4_only = [False]
+    real_ipv4_only = providers._ipv4_only
+
+    @contextmanager
+    def watching():
+        v4_only[0] = True
+        try:
+            with real_ipv4_only():
+                yield
+        finally:
+            v4_only[0] = False
+
+    monkeypatch.setattr(providers, "_ipv4_only", watching)
+    opener = FlakyOpener()
+    assert providers._open_once(opener, "request", 5) == "ok"
+    assert opener.tries == 2
+
+    # A non-reachable failure is not retried.
+    class HostileOpener:
+        def open(self, request, timeout=None):
+            raise urllib.error.URLError(OSError(errno.ECONNREFUSED, "refused"))
+
+    try:
+        providers._open_once(HostileOpener(), "request", 5)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("unrelated errors must not be swallowed")

@@ -25,7 +25,39 @@
     marker.getElement().setAttribute('aria-label', text.textContent);
     marker.getElement().setAttribute('title', text.textContent);
   });
-  if (points.length) ctrl.drawRoute({points: points, color: '#1266ba', weight: 5, opacity: 0.9});
+  // Travel direction: one colour per leg and a chevron with the heading on it.
+  var LEG_COLORS = ["#1d4f9c", "#2e7cc4", "#63a4dd", "#9ec5e8"];
+  var toLatLng = function (p) { return [p[0], p[1]]; };
+  var heading = function (a, b) {
+    var scale = Math.max(Math.cos(a[1] * Math.PI / 180), 0.2);
+    return Math.atan2((b[0] - a[0]) * scale, b[1] - a[1]) * 180 / Math.PI;
+  };
+  function drawLegs() {
+    var geo = data.geometry.map(function (p) { return [p[1], p[0]]; });
+    var cut = function (id) { var m = /^geo:(\d+)_(\d+)$/.exec(id); return m ? [Number(m[1]), Number(m[2])] : null; };
+    var legs = (data.legs || []).map(cut).filter(function (x) { return x && x[1] > x[0]; });
+    if (!legs.length && geo.length > 1) legs = [[0, geo.length - 1]];
+    var total = legs.reduce(function (n, l) { return n + l[1] - l[0]; }, 0);
+    var arrowsDrawn = 0;
+    legs.forEach(function (pair, li) {
+      var leg = geo.slice(pair[0], pair[1] + 1).map(toLatLng);
+      if (leg.length < 2) return;
+      ctrl.drawRoute({ points: leg, color: LEG_COLORS[li % LEG_COLORS.length], weight: 5, opacity: 0.95 });
+      var budget = Math.min(12, Math.ceil((pair[1] - pair[0]) / Math.max(8, Math.floor(total / 45))));
+      var step = Math.max(4, Math.floor((pair[1] - pair[0]) / budget));
+      for (var k = step; k < leg.length - Math.max(2, Math.floor(step / 2)); k += step) {
+        if (arrowsDrawn >= 45) break;
+        var deg = Math.round(heading(leg[k - 1], leg[k]));
+        L.marker(leg[k], {
+          interactive: false,
+          keyboard: false,
+          icon: L.divIcon({ className: "route-arrow", iconSize: [14, 14], html: '<div style="transform:rotate(' + deg + 'deg)">➤</div>' })
+        }).addTo(map);
+        arrowsDrawn++;
+      }
+    });
+  }
+  if (data.geometry.length > 1) drawLegs();
   var zooming = false;
   var fitPending = false;
   var fit = function () {

@@ -5,6 +5,7 @@ Artifacts and SQLite live only in a newly created scratch directory.
 """
 import importlib.util
 import json
+import re
 import os
 from pathlib import Path
 import socket
@@ -133,8 +134,27 @@ try:
         assert result['state']['solution']['geometry']['coordinates']
         expect(page.get_by_role('heading', name='Navigate', exact=True)).to_be_visible()
         frame = page.frame_locator('iframe')
-        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
-        assert len(frame.locator('.leaflet-overlay-pane path').get_attribute('d')) > 20
+        # Legs come from the payload; the first solve here is what it is (open or return).
+        doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
+        doclegs = re.findall(r'geo:\d+_\d+', doc)
+        # The pane polls every 4 s; wait until its iframe carries this document.
+        for _ in range(10):
+            if page.locator('iframe').count():
+                guest_legs = frame.locator('body').evaluate("() => (JSON.parse(document.getElementById('route-data').textContent).legs || []).join(',')")
+                if (guest_legs or '').split('geo:') == doclegs:
+                    break
+            page.wait_for_timeout(800)
+        assert ','.join(doclegs) in (guest_legs or ''), (guest_legs, doclegs)
+        leg_paths = frame.locator('.leaflet-overlay-pane path')
+        if leg_paths.count() != len(doclegs):
+            raise AssertionError({
+                'legs': doclegs, 'guest': guest_legs,
+                'paths': leg_paths.count(),
+                'arrows': frame.locator('.route-arrow').count(),
+                'polylines': frame.locator('.leaflet-overlay-pane svg path').count(),
+            })  # one leg per travel hop
+        arrows = frame.locator('.route-arrow')
+        assert arrows.count() >= max(0, len(doclegs) - 1), (arrows.count(), doclegs)
         expect(frame.locator('.sf-marker-stop')).to_have_count(3)
         assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'map or attribution clipped'
         expect(frame.locator('.leaflet-control-attribution')).to_contain_text('OpenStreetMap contributors')
@@ -158,7 +178,7 @@ try:
         map_fits()
         # Exercise real drag and zoom controls, not a JS map.setView shortcut.
         page.locator('iframe').scroll_into_view_if_needed()
-        route_path = frame.locator('.leaflet-overlay-pane path')
+        route_path = frame.locator('.leaflet-overlay-pane path').first
         original_path = route_path.get_attribute('d')
         frame.get_by_role('button', name='Zoom in', exact=True).click()
         expect(route_path).not_to_have_attribute('d', original_path)
@@ -241,7 +261,7 @@ try:
         page.route('https://*.tile.openstreetmap.org/**', lambda route: route.abort())
         frame.get_by_role('button',name='Zoom in',exact=True).click()
         expect(frame.locator('#tiles')).to_contain_text('Map tiles unavailable',timeout=15000)
-        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
+        expect(frame.locator('.leaflet-overlay-pane path')).not_to_have_count(0)
         frame.get_by_role('button',name='Fit',exact=True).click()
         map_fits()
         expect(frame.locator('#tiles')).to_contain_text('Map tiles unavailable')
@@ -272,7 +292,7 @@ try:
         assert repair and [a['title'] for a in repair['added']] and 'Teatro alla Scala' in repair['added'][0]['title'], repair
         expect(page.get_by_text(repair['summary'], exact=True)).to_be_visible()
         evidence['repair'] = repair
-        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
+        expect(frame.locator('.leaflet-overlay-pane path')).not_to_have_count(0)
         expect(frame.locator('.leaflet-tile-loaded').first).to_be_visible(timeout=30000)
         map_fits()
         shot('route-named-repair.png')
@@ -380,6 +400,11 @@ try:
         # Recomputed claim on deliberately chosen, nearby places only.
         assert all(providers.distance_m(s['coordinates'], pin['coordinates']) < 15000 for s in batch_solved['state']['stops'])
         assert comparison['savings_seconds'] == comparison['given_duration_seconds'] - solution['duration_seconds'], comparison
+        doc = page.request.get(f'http://127.0.0.1:{port}/api/current').json()['map_document']
+        doclegs = re.findall(r'geo:\d+_\d+', doc)
+        assert len(doclegs) >= 4, doclegs  # round trip: origin, stops, return home
+        assert frame.locator('.leaflet-overlay-pane path').count() == len(doclegs)
+        assert frame.locator('.route-arrow').count() >= len(doclegs) - 1
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
             expect(page.get_by_text(comparison['message'], exact=True)).to_be_visible()

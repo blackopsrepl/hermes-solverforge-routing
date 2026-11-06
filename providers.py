@@ -77,11 +77,20 @@ def _ipv4_only():
         yield
 
 
+def _unreachable(exc) -> bool:
+    """URLError wraps the OS error in `reason`; bare OSError carries errno itself."""
+    codes = (errno.EHOSTUNREACH, errno.ENETUNREACH)
+    if getattr(exc, "errno", None) in codes:
+        return True
+    return getattr(getattr(exc, "reason", None), "errno", None) in codes
+
+
 def _open_once(opener, request, timeout):
+    """One HTTPS try, then a retry pinned to IPv4 when IPv6 egress is the blocker."""
     try:
         return opener.open(request, timeout=timeout)
     except OSError as exc:
-        if getattr(exc, "errno", None) not in (errno.EHOSTUNREACH, errno.ENETUNREACH):
+        if not _unreachable(exc):
             raise
         with _ipv4_only():
             return opener.open(request, timeout=timeout)

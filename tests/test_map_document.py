@@ -30,6 +30,10 @@ def test_guest_security_and_safe_titles():
     assert '</script><script>alert(1)' not in doc
     assert payload(doc)['markers'][0]['title'] == '</script><script>alert(1)</script>'
     assert [p['number'] for p in payload(doc)['markers']] == [0, 1, 2]
+    # Round-trip splits: one leg per hop, last hop back to the start.
+    legs = payload(doc)['legs']
+    assert legs == ['geo:0_1', 'geo:1_2'], legs  # origin→stop, stop→start
+    assert payload(doc) == {**payload(doc), 'legs': legs}
     # Fit lives in the guest JS (a Leaflet control), not in the server document.
     assert 'fit-control' in doc
 
@@ -43,7 +47,7 @@ def test_stale_geometry_empty_state_and_endpoints():
     snapshot['endpoint'] = {'id': 'end', 'coordinates': [10, 46]}
     assert payload(module.map_document(snapshot))['markers'][-1]['coordinates'] == [10, 46]
     snapshot.update(origin=None, return_origin=None, stops=[], endpoint=None)
-    assert payload(module.map_document(snapshot)) == {'markers': [], 'geometry': [], 'solved': False}
+    assert payload(module.map_document(snapshot)) == {'markers': [], 'geometry': [], 'legs': [], 'solved': False}
     # The core's solved origin-only route has neither itinerary_ids nor geometry.
     snapshot.update(origin={'coordinates': [9, 45]}, solution={'revision': snapshot['revision'], 'geometry': None})
     result = payload(module.map_document(snapshot))
