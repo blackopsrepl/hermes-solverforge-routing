@@ -1,0 +1,28 @@
+manifest_version: 2
+name: solverforge-routing
+version: 0.1.0
+label: SolverForge Routing
+description: Personal coordinate-based, single-vehicle driving itineraries. OSRM receives coordinates when solving; best-found driving estimates, not navigation or live traffic.
+author: blackopsrepl
+license: Apache-2.0
+requires_hermes: ">=0.22.2"
+provides_tools:
+  - route_status
+  - route_current
+  - route_set_origin
+  - route_set_end
+  - route_set_round_trip
+  - route_add_stop
+  - route_remove_stop
+  - route_mark_visited
+  - route_set_next
+  - route_precedence
+  - route_solve
+provides_hooks: []
+capabilities: []
+config_schema:
+  binary:
+    type: str
+    default: ""
+    label: Routing engine executable path
+    description: Plain path, not a shell command. Empty uses an existing local development build or plugin-data/bin/solverforge-routing. No automatic download.

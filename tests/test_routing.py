@@ -1,7 +1,7 @@
 """Real SQLite + subprocess service tests; synthetic provider is explicit.
 
 Run: python -m unittest discover -s tests -v
-Set ROUTING_ENGINE to also exercise the actual compiled Rust JSON contract.
+ROUTING_ENGINE overrides the repository release engine; real-engine tests never skip.
 Live OSRM is opt-in via tests/live_smoke.py, not fabricated in this suite.
 """
 import copy
@@ -22,6 +22,7 @@ from routing import EngineError, RouteService, SubprocessEngine, validate_result
 from store import RouteStore, StaleRevision
 
 HERE = Path(__file__).resolve().parent
+ENGINE = os.environ.get("ROUTING_ENGINE", str(HERE.parent / "engine/target/release/solverforge-routing"))
 
 
 def place(n):
@@ -202,9 +203,8 @@ class ServiceTests(RouteFixture):
                 self.service.solve()
             self.assertIsNone(self.service.get_route()["solution"])
 
-    @unittest.skipUnless(os.environ.get("ROUTING_ENGINE"), "ROUTING_ENGINE not supplied")
     def test_actual_rust_engine_service(self):
-        self.service.engine = SubprocessEngine()
+        self.service.engine = SubprocessEngine([ENGINE])
         a, b, c = self.ids
         self.service.set_next(b)
         self.service.set_precedence([[b, a], [a, c]])
@@ -287,11 +287,10 @@ class RoundTripRegressionTests(RouteFixture):
         self.assertEqual(result["solution"]["remaining_order"], [])
 
 
-@unittest.skipUnless(os.environ.get("ROUTING_ENGINE"), "ROUTING_ENGINE not supplied")
 class RustRoundTripRegressionTests(RoundTripRegressionTests):
     def setUp(self):
         super().setUp()
-        self.engine = SubprocessEngine()
+        self.engine = SubprocessEngine([ENGINE])
         self.service.engine = self.engine
 
 

@@ -22,8 +22,12 @@ from pathlib import Path
 from typing import Any, Sequence
 from uuid import uuid4
 
-from providers import OSRMProvider, coordinate, number, ProviderError
-from store import RouteStore, StaleRevision
+if __package__:
+    from .providers import OSRMProvider, coordinate, number, ProviderError
+    from .store import RouteStore, StaleRevision
+else:
+    from providers import OSRMProvider, coordinate, number, ProviderError
+    from store import RouteStore, StaleRevision
 
 
 class EngineError(ValueError):
