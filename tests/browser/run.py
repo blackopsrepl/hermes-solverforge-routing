@@ -68,9 +68,11 @@ try:
         expect(page.locator('#pane section[data-revision]')).to_be_attached()
         def current():
             return page.request.get(f'http://127.0.0.1:{port}/api/current').json()
-        def act(control):
-            """One deliberate click edits the route; wait for the write and the refresh."""
-            with page.expect_response(lambda r: '/api/actions/' in r.url and '/search_locations' not in r.url) as response:
+        def act(control, timeout_ms=240_000):
+            """One deliberate click edits the route; wait for the write and the
+            refresh. The first plan can fetch roads live, so the write wait
+            must cover a cold download, not just a solve."""
+            with page.expect_response(lambda r: '/api/actions/' in r.url and '/search_locations' not in r.url, timeout=timeout_ms) as response:
                 control.click()
             result = response.value.json()
             assert result['ok'], result
@@ -222,7 +224,23 @@ try:
         qr_svg.screenshot(path=str(qr_path))
         screenshots.append(str(qr_path))
         decoded, corners, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(qr_path)))
-        assert corners is not None and decoded == navigation['google_mobile']['legs'][0]['url'], decoded
+        # The phone kind is picked before the scan: the Apple code is the
+        # default whenever an Apple leg carries one, so the first code the
+        # camera sees is Apple's, and only the Android pill swaps providers.
+        apple_first = navigation['apple']['legs'][0]
+        default_url = apple_first['url'] if apple_first.get('qr') else navigation['google_mobile']['legs'][0]['url']
+        assert corners is not None and decoded == default_url, decoded
+        # The provider pill swaps what the camera sees, exactly one code on
+        # screen either way.
+        page.get_by_role('button', name='Android → Google Maps').click()
+        qr_svg = page.locator('svg[role=img]').first
+        qr_svg.scroll_into_view_if_needed()
+        google_qr_path = ARTIFACTS / 'navigation-qr-google.png'
+        qr_svg.screenshot(path=str(google_qr_path))
+        screenshots.append(str(google_qr_path))
+        google_decoded, google_corners, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(google_qr_path)))
+        assert google_corners is not None and google_decoded == navigation['google_mobile']['legs'][0]['url'], google_decoded
+        page.get_by_role('button', name='iPhone → Apple Maps').click()
         handoff_path = ARTIFACTS / 'navigation-handoff.png'
         page.get_by_role('heading', name='Navigate', exact=True).locator('..').screenshot(path=str(handoff_path))
         screenshots.append(str(handoff_path))
@@ -395,7 +413,9 @@ try:
         assert all(geo.distance_m(s['coordinates'], pin['coordinates']) < 15000 for s in batch_solved['state']['stops'])
         assert comparison['savings_seconds'] == comparison['given_duration_seconds'] - solution['duration_seconds'], comparison
         assert len(solution['legs']) >= 4, solution['legs']  # round trip: origin, stops, return home
-        assert frame.locator('.leaflet-overlay-pane path').count() == len(solution['legs'])
+        # The docked map follows the solved document on its own poll; retry
+        # the count until the pane has drawn exactly one line per hop.
+        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(len(solution['legs']), timeout=15000)
         if comparison['message']:
             assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
             expect(page.get_by_text(comparison['message'], exact=True)).to_be_visible()
