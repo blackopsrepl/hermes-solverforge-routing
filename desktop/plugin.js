@@ -44,7 +44,10 @@ function Handoff({nav, showQr, onToggleQr}) {
     jsxs('details',{style:muted,children:[jsx('summary',{style:{cursor:'pointer'},children:'OpenStreetMap'}),
       jsx('div',{style:{...row,marginTop:8},children:nav.osm.legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:legName(leg,points)},`osm${i}`))})]}),
     jsx(Button,{onClick:onToggleQr,variant:'text',size:'sm',children:showQr?'Hide QR code':'Send to phone (QR code)'}),
-    showQr ? jsx('div',{style:{...row,alignItems:'flex-start',gap:16},children:mobile.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:mobile.length>1?`Part ${i+1}/${mobile.length}: ${legName(leg,points)}`:'Scan with your phone'},`qr${i}`))}) : null
+    showQr ? jsxs('div',{style:{...row,alignItems:'flex-start',gap:16},children:[
+      ...nav.apple.legs.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:nav.apple.legs.length>1?`Part ${i+1}/${nav.apple.legs.length}: ${legName(leg,points)}`:'On iPhone: opens the Apple Maps app'},`qr-apple${i}`)),
+      ...mobile.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:mobile.length>1?`Part ${i+1}/${mobile.length}: ${legName(leg,points)}`:'On Android: opens Google Maps'},`qr-google${i}`)),
+    ]}) : null
   ]})
 }
 const km = metres => `${(metres/1000).toFixed(1)} km`

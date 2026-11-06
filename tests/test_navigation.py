@@ -110,6 +110,16 @@ def test_qr_codes_decode_to_exact_mobile_links(n):
         assert leg["qr"]["path"] in leg["qr"]["svg"]
 
 
+@pytest.mark.parametrize("n", [1, 3, 8, 14])
+def test_qr_codes_decode_to_exact_apple_links(n):
+    nav = navigation.handoff(state_with(n, round_trip=True), qr=True)
+    assert nav is not None
+    for leg in nav["apple"]["legs"]:
+        assert decode(leg["qr"]) == leg["url"]
+        assert leg["qr"]["svg"].startswith('<svg xmlns="http://www.w3.org/2000/svg"')
+        assert leg["qr"]["path"] in leg["qr"]["svg"]
+
+
 def test_long_desktop_link_qr_decodes():
     url = navigation.handoff(state_with(12))["google"]["legs"][0]["url"]
     assert decode(navigation.qr_code(url)) == url

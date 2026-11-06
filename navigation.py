@@ -131,8 +131,11 @@ def handoff(state: dict, *, qr: bool = False) -> dict | None:
     coords = [p["coordinates"] for p in points]
     google = _legs(points, GOOGLE_MAX_WAYPOINTS, google_url)
     mobile = _legs(points, GOOGLE_MOBILE_MAX_WAYPOINTS, google_url)
+    apple = _legs(points, APPLE_MAX_WAYPOINTS, apple_url)
     if qr:
         for leg in mobile:
+            leg["qr"] = qr_code(leg["url"])
+        for leg in apple:
             leg["qr"] = qr_code(leg["url"])
     return {
         "revision": state["revision"], "travelmode": "driving",
@@ -140,8 +143,8 @@ def handoff(state: dict, *, qr: bool = False) -> dict | None:
         "google": {"max_waypoints": GOOGLE_MAX_WAYPOINTS, "split": len(google) > 1, "legs": google},
         "google_mobile": {"max_waypoints": GOOGLE_MOBILE_MAX_WAYPOINTS, "split": len(mobile) > 1, "legs": mobile,
                           "note": "For phones: Google documents only three waypoints in mobile browsers, so QR codes use shorter legs."},
-        "apple": {"max_waypoints": APPLE_MAX_WAYPOINTS, "legs": _legs(points, APPLE_MAX_WAYPOINTS, apple_url),
-                  "note": "Apple unified Maps URLs; multi-stop needs iOS 18.4 / macOS 15.4 or later."},
+        "apple": {"max_waypoints": APPLE_MAX_WAYPOINTS, "split": len(apple) > 1, "legs": apple,
+                  "note": "Apple unified Maps URLs; multi-stop needs iOS 18.4 / macOS 15.4 or later. Scanning the Apple QR opens the Apple Maps app on iPhone."},
         "osm": {"legs": [{"from": i, "to": i + 1, "url": osm_url(coords[i], coords[i + 1])} for i in range(len(coords) - 1)],
                 "note": "openstreetmap.org directions take exactly two points: one link per leg."},
         "disclosure": DISCLOSURE,

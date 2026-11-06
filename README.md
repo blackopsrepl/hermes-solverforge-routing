@@ -60,7 +60,7 @@ This is a personal, single-vehicle trip planner, not fleet dispatch. It does not
 
 **A map that stays with the conversation.** [solverforge-ui](https://github.com/SolverForge/solverforge-ui) and Leaflet display the roads in a sandboxed pane. Numbered stops match the itinerary underneath. The map is a viewer; Hermes remains the input.
 
-**A handoff to your navigation app.** Open the itinerary in Google Maps, Apple Maps or OpenStreetMap, or scan its QR code on your phone. Long trips are split into linked sections rather than silently dropping stops. The navigation app calculates its own route using its own road data.
+**A handoff to your navigation app.** Open the itinerary in Google Maps, Apple Maps or OpenStreetMap, or scan its QR code on your phone. Two kinds of QR are offered: scanning the Apple code on an iPhone opens the Apple Maps app, while the Google code is for Android phones. Long trips are split into linked sections rather than silently dropping stops. The navigation app calculates its own route using its own road data.
 
 ![Navigation links and phone handoff for the solved itinerary](docs/screenshots/navigation.png)
 
