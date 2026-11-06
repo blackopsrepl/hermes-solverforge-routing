@@ -48,6 +48,20 @@ def test_registration_is_lazy_and_exact(monkeypatch):
     assert ctx.skills[0][0] == 'routing'
 
 
+def test_dashboard_manifest_mounts_the_rest_backend():
+    # Hermes mounts plugin_api.py only when the manifest names it; without it every
+    # Desktop ctx.rest call 404s even though the page itself loads.
+    data = json.loads((ROOT / 'dashboard' / 'manifest.json').read_text())
+    assert data['name'] == yaml_name()
+    assert data['api'] == 'plugin_api.py' and (ROOT / 'dashboard' / data['api']).is_file()
+    assert data['tab'] == {'hidden': True}
+
+
+def yaml_name():
+    import yaml
+    return yaml.safe_load((ROOT / 'plugin.yaml').read_text())['name']
+
+
 def test_core_import_preserves_unrelated_plugin_modules(monkeypatch):
     import types
     sentinels = {name: types.ModuleType(name) for name in ('providers', 'store')}
