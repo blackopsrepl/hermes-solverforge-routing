@@ -45,7 +45,7 @@ def test_stale_geometry_empty_state_and_endpoints():
     snapshot['endpoint'] = {'id': 'end', 'coordinates': [10, 46]}
     assert payload(module.map_document(snapshot))['markers'][-1]['coordinates'] == [10, 46]
     snapshot.update(origin=None, return_origin=None, stops=[], endpoint=None)
-    assert payload(module.map_document(snapshot)) == {'markers': [], 'geometry': [], 'legs': [], 'solved': False}
+    assert payload(module.map_document(snapshot)) == {'markers': [], 'geometry': [], 'legs': [], 'solved': False, 'round_trip': False}
     # The core's solved origin-only route has neither itinerary_ids nor geometry.
     snapshot.update(origin={'coordinates': [9, 45]}, solution={'revision': snapshot['revision'], 'geometry': None})
     result = payload(module.map_document(snapshot))

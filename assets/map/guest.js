@@ -18,7 +18,9 @@
     var first = stops[0];
     // The start reads S, as in the itinerary; unplanned stops carry no number yet.
     var badge = function (p) { return p.number === 0 ? 'S' : data.solved ? String(p.number) : '•'; };
-    var marker = ctrl.addStopNumber({lat: first.coordinates[1], lng: first.coordinates[0], number: stops.map(badge).join('/'), color: '#144e87'});
+    // The home marker is amber; the dashed closing leg matches it.
+    var markerColor = stops.some(function (p) { return p.number === 0; }) ? '#b45309' : '#144e87';
+    var marker = ctrl.addStopNumber({lat: first.coordinates[1], lng: first.coordinates[0], number: stops.map(badge).join('/'), color: markerColor});
     var text = document.createElement('span');
     text.textContent = stops.map(function (p) { return (data.solved || p.number === 0 ? badge(p) + ': ' : '') + p.title; }).join(' · ');
     marker.bindPopup(text);
@@ -26,9 +28,19 @@
     marker.getElement().setAttribute('title', text.textContent);
   });
   // One line per travel hop, exactly as the engine routed it on the road graph.
+  // A round trip's closing leg is dashed in amber: the way home is explicit,
+  // and the dash stays visible where it draws over the outbound line.
   var LEG_COLORS = ['#1d4f9c', '#2e7cc4', '#63a4dd', '#9ec5e8'];
-  (data.legs || []).forEach(function (leg, n) {
-    ctrl.drawRoute({ points: leg.map(function (p) { return [p[1], p[0]]; }), color: LEG_COLORS[n % LEG_COLORS.length], weight: 5, opacity: 1 });
+  var legs = data.legs || [];
+  legs.forEach(function (leg, n) {
+    var closing = data.round_trip && n === legs.length - 1;
+    ctrl.drawRoute({
+      points: leg.map(function (p) { return [p[1], p[0]]; }),
+      color: closing ? '#b45309' : LEG_COLORS[n % LEG_COLORS.length],
+      weight: 5,
+      opacity: 1,
+      dashArray: closing ? '6 8' : undefined,
+    });
   });
   var zooming = false;
   var fitPending = false;
