@@ -9,7 +9,11 @@ const panel = { border:'1px solid var(--ui-stroke-secondary)', borderRadius:12, 
 const row = { display:'flex', alignItems:'center', flexWrap:'wrap', gap:8 }
 const field = { padding:'9px 12px', borderRadius:7, border:'1px solid var(--ui-stroke-secondary)', background:'var(--ui-bg-primary, transparent)', color:'var(--ui-text-primary)', minWidth:180, flex:1 }
 const paragraph = text => jsx('p', { style:{...muted,margin:'6px 0'}, children: text })
-const label = place => place ? (place.title || place.coordinates.join(', ')) : 'Not set'
+// Geocoder titles are full postal strings; people read the place name first.
+const splitName = text => { const parts = String(text || '').split(',').map(s => s.trim()).filter(Boolean); const n = parts.length > 1 && /^\d+[a-z]?$/i.test(parts[0]) ? 2 : 1; return [parts.slice(0, n).reverse().join(' '), parts.slice(n, n + 2).join(', ')] }
+const short = text => splitName(text)[0]
+const label = place => place ? (place.title ? short(place.title) : place.coordinates.join(', ')) : 'Not set'
+const NameLines = ({text, strong=true}) => { const [name, rest] = splitName(text); return jsxs('div',{children:[jsx(strong?'strong':'span',{children:name}), rest ? jsx('div',{style:{...muted,fontSize:12},children:rest}) : null]}) }
 // Only these exact provider prefixes are rendered as links (built server-side
 // from coordinates). No target attribute: Electron's window-open policy denies
 // every new-window request, while a main-frame link navigation is cancelled and handed to
@@ -50,19 +54,10 @@ const km = metres => `${(metres/1000).toFixed(1)} km`
 const facts = c => [c.kind, c.locality, c.distance_from_start_m != null ? `${km(c.distance_from_start_m)} from start` : c.nearest_route_point_m != null ? `${km(c.nearest_route_point_m)} from nearest stop` : null].filter(Boolean).join(' · ')
 const farFlag = c => c.far ? jsx('strong',{style:{color:'var(--ui-warning, #f5b041)'},children:' · far away'}) : null
 function CandidateText({c}) {
-  return jsxs('span',{children:[` ${c.label}`,jsxs('span',{style:{...muted,display:'block',marginLeft:22},children:[facts(c),farFlag(c)]})]})
+  return jsxs('div',{children:[jsx('strong',{children:short(c.label)}),jsxs('div',{style:{...muted,fontSize:12},children:[facts(c),farFlag(c)]})]})
 }
 const initialChoice = item => item.status === 'supplied' ? 'use' : item.preselected || (item.status === 'needs_choice' ? null : 'skip')
 const ROLE = { origin:'Start', stop:'Stop', endpoint:'End' }
-const CONFIRM = {
-  solve: () => 'Solve the route?',
-  confirm_location: (p, place) => `${{origin:'Start from',stop:'Add stop',endpoint:'End at'}[p.args.role]} ${place}?`,
-  confirm_plan: p => `Add ${p.count} place${p.count===1?'':'s'}?`,
-  set_origin: () => 'Set the start?', add_stop: () => 'Add this stop?', set_end: p => p.args.endpoint ? 'Set the end?' : 'Clear the end?',
-  set_round_trip: p => p.args.enabled ? 'Return home at the end?' : 'Don’t return home?',
-  set_next: p => p.args.stop_id ? 'Go here next?' : 'Clear the next stop?',
-  mark_visited: () => 'Mark as visited?', remove_stop: () => 'Remove this stop?', precedence: () => 'Update the visit order?'
-}
 function PendingPlan({plan, state, onApply, busy}) {
   const [choices, setChoices] = useState(() => Object.fromEntries(plan.items.map(item => [item.index, initialChoice(item)])))
   const stale = plan.base_revision !== state.revision
@@ -95,7 +90,6 @@ function RoutingSurface({ editable = false, scope }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [region, setRegion] = useState('')
   const [results, setResults] = useState(null)
-  const [chosen, setChosen] = useState(null)
   const [searching, setSearching] = useState(false)
   const [title, setTitle] = useState('')
   const [coordinates, setCoordinates] = useState('')
@@ -112,11 +106,14 @@ function RoutingSurface({ editable = false, scope }) {
   const fresh = solution && data.solved_revision === state.revision
   const byId = new Map(state.stops.map(s => [s.id,s]))
   const order = fresh ? solution.remaining_order : state.stops.filter(s => !s.visited).map(s => s.id)
-  const action = (name,args={}) => setPending({action:name,args:{...args,expected_revision:state.revision}})
-  const button = (text, click, disabled=false) => jsx(Button,{onClick:click,disabled:disabled || mutation.isPending,children:text},text)
+  // Buttons are the deliberate step: they edit directly. Only removing a stop asks again.
+  const run = (name,args={}) => mutation.mutate({action:name,args:{...args,expected_revision:state.revision}})
+  const action = (name,args={}) => name === 'remove_stop' ? setPending({action:name,args:{...args,expected_revision:state.revision}}) : run(name,args)
+  const button = (text, click, disabled=false, variant='secondary') => jsx(Button,{onClick:click,disabled:disabled || mutation.isPending,variant,size:'sm',children:text},text)
+  const primary = (text, click, disabled=false) => button(text, click, disabled, 'default')
   const search = async () => {
     if (host.state.connectionId.get() !== scope[0] || host.state.profile.get() !== scope[1]) return
-    setSearching(true); setResults(null); setChosen(null)
+    setSearching(true); setResults(null)
     try {
       const result = await rest('/actions/search_locations', {method:'POST',body:{query:searchQuery,region}})
       if (result.ok) setResults(result)
@@ -124,53 +121,85 @@ function RoutingSurface({ editable = false, scope }) {
     } catch (error) { setMessage(error.message || 'Search unavailable.') }
     finally { setSearching(false) }
   }
-  const pendingCandidate = results?.candidates.find(c=>c.candidate_id===pending?.args.candidate_id)
-  const confirmedLabel = pendingCandidate ? label({title:pendingCandidate.label,coordinates:pendingCandidate.coordinates}) : 'this place'
+  const usePlace = (candidate, role) => { action('confirm_location',{candidate_id:candidate.candidate_id,role}); setResults(null); setSearchQuery('') }
+  const useCoordinates = (name, field) => {
+    const parts = coordinates.split(',').map(s=>s.trim())
+    if (parts.length!==2 || parts.some(s=>!s || !Number.isFinite(Number(s)))) { setMessage('Enter longitude, latitude.'); return }
+    action(name,{[field]:{title,coordinates:parts.map(Number)}}); setTitle(''); setCoordinates('')
+  }
   const home = state.return_origin || state.return_location || state.home || state.start_origin
+  const hasStart = Boolean(state.origin)
+  const open = state.stops.filter(s => !s.visited)
+  const canPlan = hasStart && open.length > 0 && data.engine.available
+  const removing = pending?.action === 'remove_stop' ? byId.get(pending.args.stop_id) : null
+  const resultActions = candidate => hasStart
+    ? [primary('Add stop',()=>usePlace(candidate,'stop')), button('End here',()=>usePlace(candidate,'endpoint'),false,'text')]
+    : [primary('Start here',()=>usePlace(candidate,'origin'))]
+  const stopRow = (id, index) => {
+    const stop = byId.get(id); if (!stop) return null
+    const isNext = state.next_id === id
+    return jsxs('li',{style:{...row,padding:'12px 0',borderTop:'1px solid var(--ui-stroke-tertiary)'},children:[
+      jsx('span',{style:{display:'grid',placeItems:'center',width:30,height:30,borderRadius:'50%',background:fresh?'var(--ui-accent)':'var(--ui-bg-quaternary)',color:fresh?'var(--ui-bg-primary, white)':'var(--ui-text-primary)',fontWeight:700},children:fresh?index+1:'•'}),
+      jsxs('div',{style:{flex:1,minWidth:160},children:[jsx(NameLines,{text:stop.title || stop.coordinates.join(', ')}),isNext?jsx('div',{style:{...muted,color:'var(--ui-accent)',fontWeight:600},children:'Going here next'}):null]}),
+      editable?jsxs('span',{style:row,children:[
+        isNext ? button('Don’t go next',()=>action('set_next',{stop_id:null}),false,'text') : button('Go here next',()=>action('set_next',{stop_id:id}),false,'text'),
+        button('Visited',()=>action('mark_visited',{stop_id:id})),
+        button('Remove',()=>action('remove_stop',{stop_id:id}),false,'outline')]}):null]},id)
+  }
+  const nameOf = id => short(byId.get(id)?.title) || 'Stop'
   return jsxs('section',{'data-revision':state.revision,style:{padding:24,maxWidth:1120,margin:'0 auto',display:'flex',flexDirection:'column',gap:14,color:'var(--ui-text-primary)',fontFamily:'inherit'},children:[
-    jsxs('header',{style:{...row,justifyContent:'space-between'},children:[jsxs('div',{children:[jsx('h2',{style:{margin:'0 0 4px',fontSize:25,letterSpacing:'-.5px'},children:'Your driving route'})]}),button('Refresh',()=>query.refetch())]}),
-    jsxs('div',{style:{...panel,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))',gap:18},children:[
-      jsxs('div',{children:[jsx('strong',{children:'Start'}),paragraph(label(state.origin))]}),
-      jsxs('div',{children:[jsx('strong',{children:'Driving'}),paragraph(fresh?`${Math.ceil(solution.road_duration_seconds/60)} min · ${(solution.distance_m/1000).toFixed(1)} km`:state.stops.length?'Not solved yet':'—'),fresh&&solution.comparison?.message?jsx('p',{style:{margin:'6px 0',fontWeight:700,color:'var(--ui-accent)'},children:solution.comparison.message}):null,paragraph(`${order.length} to go${state.visited.length?` · ${state.visited.length} visited`:''}`)]}),
-      jsxs('div',{children:[jsx('strong',{children:'End'}),paragraph(state.round_trip?`Back home · ${label(home || state.origin)}`:state.endpoint?label(state.endpoint):'Last stop')]})
+    jsxs('header',{style:{...row,justifyContent:'space-between'},children:[jsx('h2',{style:{margin:0,fontSize:25,letterSpacing:'-.5px'},children:'Your driving route'}),button('Refresh',()=>query.refetch(),false,'ghost')]}),
+    jsxs('div',{style:{...panel,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:18,alignItems:'start'},children:[
+      jsxs('div',{children:[jsx('strong',{children:'Start'}),paragraph(hasStart?label(state.origin):'Not set yet')]}),
+      jsxs('div',{children:[jsx('strong',{children:'End'}),paragraph(state.round_trip?`Back to start`:state.endpoint?label(state.endpoint):'At the last stop')]}),
+      jsxs('div',{children:[jsx('strong',{children:'Driving'}),
+        fresh ? jsxs('div',{children:[paragraph(`${Math.ceil(solution.road_duration_seconds/60)} min · ${(solution.distance_m/1000).toFixed(1)} km · ${order.length} stop${order.length===1?'':'s'} to go`),solution.comparison?.message?jsx('p',{style:{margin:'6px 0',fontWeight:700,color:'var(--ui-accent)'},children:solution.comparison.message}):null]})
+          : canPlan ? jsxs('div',{style:{...row,marginTop:6},children:[primary('Plan route',()=>run('solve',{solve_seconds:2}))]})
+          : paragraph(!hasStart ? 'Add a start and a stop' : !open.length ? 'Add a stop' : 'Routing engine not installed')]})
     ]}),
-    !data.engine.available ? paragraph('Routing engine not installed.') : null,
-    data.pending_plan ? jsx(PendingPlan,{plan:data.pending_plan,state,busy:mutation.isPending,onApply:(args,count)=>setPending({action:'confirm_plan',args,count})},data.pending_plan.plan_id) : null,
+    data.pending_plan ? jsx(PendingPlan,{plan:data.pending_plan,state,busy:mutation.isPending,onApply:(args)=>run('confirm_plan',args)},data.pending_plan.plan_id) : null,
     fresh && solution.repair ? jsxs('div',{style:panel,children:[jsx('strong',{children:'Changes'}),paragraph(solution.repair.summary),
-      jsx('ul',{style:{...muted,margin:'4px 0',paddingLeft:20},children:[...solution.repair.added.map(s=>jsx('li',{children:`Added ${s.title} as stop ${s.position}`},'a'+s.id)),...solution.repair.removed.map(s=>jsx('li',{children:`Removed ${s.title}`},'r'+s.id)),...solution.repair.visited.map(s=>jsx('li',{children:`Visited ${s.title}`},'v'+s.id)),...solution.repair.moved.map(s=>jsx('li',{children:`${s.title}: stop ${s.previous_position} → ${s.position}`},'m'+s.id))]})]}) : null,
-    data.map_document ? jsx(SandboxedFrame,{src:'data:text/html;charset=utf-8,'+encodeURIComponent(data.map_document),sandbox:'allow-scripts',title:'Route map',style:{width:'100%',height:'clamp(360px, 42vw, 480px)',border:'1px solid var(--ui-stroke-secondary)',borderRadius:12,flexShrink:0}}) : paragraph('Map unavailable.'),
-    fresh ? jsx(Handoff,{nav:data.navigation}) : null,
+      jsx('ul',{style:{...muted,margin:'4px 0',paddingLeft:20},children:[...solution.repair.added.map(s=>jsx('li',{children:`Added ${short(s.title)} as stop ${s.position}`},'a'+s.id)),...solution.repair.removed.map(s=>jsx('li',{children:`Removed ${short(s.title)}`},'r'+s.id)),...solution.repair.visited.map(s=>jsx('li',{children:`Visited ${short(s.title)}`},'v'+s.id)),...solution.repair.moved.map(s=>jsx('li',{children:`${short(s.title)}: stop ${s.previous_position} → ${s.position}`},'m'+s.id))]})]}) : null,
+    (hasStart || state.stops.length) && data.map_document ? jsx(SandboxedFrame,{src:'data:text/html;charset=utf-8,'+encodeURIComponent(data.map_document),sandbox:'allow-scripts',title:'Route map',style:{width:'100%',height:'clamp(320px, 38vw, 460px)',border:'1px solid var(--ui-stroke-secondary)',borderRadius:12,flexShrink:0}}) : null,
     jsxs('div',{style:panel,children:[
-      jsx('h3',{style:{margin:'0 0 12px'},children:fresh?'Itinerary':'Stops'}),
-      order.length ? jsx('ol',{style:{listStyle:'none',padding:0,margin:0},children:order.map((id,index) => { const stop=byId.get(id); if(!stop)return null; return jsxs('li',{style:{...row,padding:'12px 0',borderTop:'1px solid var(--ui-stroke-tertiary)'},children:[jsx('span',{style:{display:'grid',placeItems:'center',width:30,height:30,borderRadius:'50%',background:'var(--ui-accent)',color:'var(--ui-bg-primary, white)',fontWeight:700},children:index+1}),jsxs('div',{style:{flex:1,minWidth:160},children:[jsx('strong',{children:stop.title || stop.coordinates.join(', ')}),state.next_id===id?paragraph('Next'):null]}),editable?jsxs('span',{style:row,children:[button('Set next',()=>action('set_next',{stop_id:id})),button('Mark visited',()=>action('mark_visited',{stop_id:id})),button('Remove',()=>action('remove_stop',{stop_id:id}))]}):null]},id) })}):paragraph('No stops yet.'),
-      fresh && state.round_trip ? paragraph(`${order.length + 1}. Home · ${label(home || state.origin)}`) : fresh && state.endpoint ? paragraph(`${order.length + 1}. End: ${label(state.endpoint)}`) : null,
-      state.visited.length ? jsxs('details',{style:{marginTop:12},children:[jsx('summary',{children:`Visited · ${state.visited.length}`}),jsx('ul',{children:state.visited.map(id=>jsx('li',{children:label(byId.get(id))},id))})]}):null
+      jsx('h3',{style:{margin:'0 0 4px'},children:fresh?'Itinerary':'Stops'}),
+      order.length ? jsx('ol',{style:{listStyle:'none',padding:0,margin:0},children:order.map(stopRow)}) : paragraph(hasStart ? 'No stops yet.' : 'Search for where you start, then add the places you want to visit.'),
+      fresh && state.round_trip ? paragraph(`Then back to start`) : fresh && state.endpoint ? paragraph(`Then end at ${label(state.endpoint)}`) : null,
+      state.visited.length ? jsxs('details',{style:{marginTop:12},children:[jsx('summary',{style:{cursor:'pointer'},children:`Visited · ${state.visited.length}`}),jsx('ul',{children:state.visited.map(id=>jsx('li',{children:label(byId.get(id))},id))})]}):null,
+      removing ? jsxs('div',{role:'alert',style:{...row,marginTop:12,padding:12,borderRadius:8,border:'1px solid var(--ui-accent)'},children:[jsx('span',{style:{flex:1},children:`Remove ${short(removing.title) || 'this stop'}?`}),primary('Remove',()=>mutation.mutate(pending)),button('Keep',()=>setPending(null),false,'text')]}) : null
     ]}),
+    fresh ? jsx(Handoff,{nav:data.navigation}) : null,
     editable ? jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:12},children:[
-      jsx('h3',{style:{margin:0},children:'Add a place'}),
-      jsxs('div',{style:row,children:[jsx('input',{style:field,value:searchQuery,disabled:searching,maxLength:300,onChange:e=>{setSearchQuery(e.target.value);setResults(null);setChosen(null)},'aria-label':'Place or address',placeholder:'Place or street address'}),jsx('input',{style:field,value:region,disabled:searching,maxLength:200,onChange:e=>{setRegion(e.target.value);setResults(null);setChosen(null)},'aria-label':'City or region',placeholder:'City or region'})]}),
-      button(searching?'Searching…':'Search',search,searching || !searchQuery.trim()),
-      results ? jsxs('div',{children:[jsx('ul',{style:{paddingLeft:20},children:results.candidates.map(candidate=>jsx('li',{style:{marginBottom:12},children:jsxs('label',{style:{display:'block',overflowWrap:'anywhere'},children:[jsx('input',{type:'radio',name:'candidate',checked:chosen===candidate.candidate_id,onChange:()=>setChosen(candidate.candidate_id)}),jsx(CandidateText,{c:candidate})]})},candidate.candidate_id))}),
-        !results.candidates.length?paragraph('No matches.'):null,
-        results.expected_kind && results.candidates.length && !results.candidates.some(c=>c.matches_query_kind)?paragraph(`No ${results.expected_kind} found. Try the official name.`):null,
-        jsxs('div',{style:row,children:[['Set as start','origin'],['Add stop','stop'],['Set as end','endpoint']].map(([text,role])=>button(text,()=>action('confirm_location',{candidate_id:chosen,role}),!chosen))})]}):null,
-      jsx('h3',{style:{margin:0},children:'Or coordinates'}),
-      jsxs('div',{style:row,children:[jsx('input',{style:field,value:title,onChange:e=>setTitle(e.target.value),placeholder:'Name','aria-label':'Name'}),
-      jsx('input',{style:field,value:coordinates,onChange:e=>setCoordinates(e.target.value),placeholder:'longitude, latitude','aria-label':'Longitude, latitude'})]}),
-      jsxs('div',{style:row,children:[...[['Set as start','set_origin','origin'],['Add stop','add_stop','stop'],['Set as end','set_end','endpoint']].map(([text,name,field])=>button(text,()=>{const parts=coordinates.split(',').map(s=>s.trim());if(parts.length!==2 || parts.some(s=>!s || !Number.isFinite(Number(s)))){setMessage('Enter longitude, latitude.');return}action(name,{[field]:{title,coordinates:parts.map(Number)}})})),
-      ]}),
-      jsxs('details',{children:[jsx('summary',{style:{cursor:'pointer',fontWeight:600},children:'Options'}),
-      jsxs('div',{style:{...row,marginTop:12},children:[button('Clear end',()=>action('set_end',{endpoint:null})),button(state.round_trip?'Don’t return home':'Return home',()=>action('set_round_trip',{enabled:!state.round_trip})),
-      button('Clear next',()=>action('set_next',{stop_id:null})),
-      jsx('h3',{children:'Visit order'}),
-      ...[['First',before,setBefore],['Then',after,setAfter]].map(([text,value,set])=>jsx('select',{style:field,'aria-label':text,value,onChange:e=>set(e.target.value),children:[jsx('option',{value:'',children:text},'placeholder'),...state.stops.filter(s=>!s.visited).map(s=>jsx('option',{value:s.id,children:s.title || s.id},s.id))]},text)),
-      button('Add rule',()=>action('precedence',{pairs:[...state.precedence,[before,after]]}),!before || !after || before===after),
-      jsx('ul',{children:state.precedence.map(([a,b],i)=>jsxs('li',{children:[`${label(byId.get(a))} before ${label(byId.get(b))}`,button('Remove',()=>action('precedence',{pairs:state.precedence.filter((_,n)=>n!==i)}))]},`${a}:${b}:${i}`))}),
-      ]})]}),
-      button('Solve route',()=>action('solve',{solve_seconds:2}),!data.engine.available),
-    ]}):null,
-    pending ? jsxs('div',{style:{...panel,borderColor:'var(--ui-accent)'},role:'alert',children:[paragraph(CONFIRM[pending.action]?.(pending, confirmedLabel) ?? 'Apply this change?'),button('Confirm',()=>mutation.mutate(pending)),button('Cancel',()=>setPending(null))]}):null,
-    jsx('div',{role:'status',children:message}), mutation.isPending?paragraph('Working…'):null
+      jsx('h3',{style:{margin:0},children:hasStart?'Add a stop':'Where do you start?'}),
+      jsxs('form',{style:row,onSubmit:e=>{e.preventDefault(); if(searchQuery.trim() && !searching) search()},children:[
+        jsx('input',{style:{...field,flex:2},value:searchQuery,disabled:searching,maxLength:300,onChange:e=>{setSearchQuery(e.target.value);setResults(null)},'aria-label':'Place or address',placeholder:'Place or street address'}),
+        jsx('input',{style:field,value:region,disabled:searching,maxLength:200,onChange:e=>{setRegion(e.target.value);setResults(null)},'aria-label':'City or region',placeholder:'City or region'}),
+        jsx(Button,{type:'submit',disabled:searching || !searchQuery.trim(),size:'sm',children:searching?'Searching…':'Search'})]}),
+      results ? (results.candidates.length ? jsx('ul',{style:{listStyle:'none',padding:0,margin:0},children:results.candidates.map(candidate=>jsxs('li',{style:{...row,padding:'10px 0',borderTop:'1px solid var(--ui-stroke-tertiary)'},children:[
+          jsx('div',{style:{flex:1,minWidth:200,overflowWrap:'anywhere'},children:jsx(CandidateText,{c:candidate})}),
+          jsx('span',{style:row,children:resultActions(candidate)})]},candidate.candidate_id))}) : paragraph('No matches.')) : null,
+      results && results.expected_kind && results.candidates.length && !results.candidates.some(c=>c.matches_query_kind) ? paragraph(`No ${results.expected_kind} found. Try the official name.`) : null,
+      jsxs('details',{children:[jsx('summary',{style:{cursor:'pointer',...muted},children:'Use coordinates instead'}),
+        jsxs('div',{style:{...row,marginTop:10},children:[
+          jsx('input',{style:field,value:title,onChange:e=>setTitle(e.target.value),placeholder:'Name','aria-label':'Name'}),
+          jsx('input',{style:field,value:coordinates,onChange:e=>setCoordinates(e.target.value),placeholder:'longitude, latitude','aria-label':'Longitude, latitude'}),
+          ...(hasStart ? [primary('Add stop',()=>useCoordinates('add_stop','stop')),button('End here',()=>useCoordinates('set_end','endpoint'),false,'text')] : [primary('Start here',()=>useCoordinates('set_origin','origin'))])]})]})
+    ]}) : null,
+    editable && hasStart ? jsxs('div',{style:{...panel,display:'flex',flexDirection:'column',gap:12},children:[
+      jsx('h3',{style:{margin:0},children:'Preferences'}),
+      jsxs('label',{style:{...row,cursor:'pointer'},children:[jsx('input',{type:'checkbox',checked:Boolean(state.round_trip),disabled:mutation.isPending,onChange:()=>action('set_round_trip',{enabled:!state.round_trip})}),'Return to the start at the end']}),
+      state.endpoint && !state.round_trip ? jsxs('div',{style:row,children:[jsx('span',{children:`Ends at ${label(state.endpoint)}`}),button('Remove end',()=>action('set_end',{endpoint:null}),false,'text')]}) : null,
+      open.length > 1 ? jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8},children:[
+        jsx('strong',{children:'Visit order'}),
+        ...state.precedence.map(([a,b],i)=>jsxs('div',{style:row,children:[jsx('span',{children:`${nameOf(a)} before ${nameOf(b)}`}),button('Remove',()=>action('precedence',{pairs:state.precedence.filter((_,n)=>n!==i)}),false,'text')]},`${a}:${b}:${i}`)),
+        jsxs('div',{style:row,children:[
+          jsx('span',{children:'Visit'}),
+          jsx('select',{style:{...field,flex:'0 1 220px',minWidth:140},'aria-label':'First',value:before,onChange:e=>setBefore(e.target.value),children:[jsx('option',{value:'',children:'choose a stop'},'placeholder'),...open.map(s=>jsx('option',{value:s.id,children:short(s.title) || s.id},s.id))]}),
+          jsx('span',{children:'before'}),
+          jsx('select',{style:{...field,flex:'0 1 220px',minWidth:140},'aria-label':'Then',value:after,onChange:e=>setAfter(e.target.value),children:[jsx('option',{value:'',children:'choose a stop'},'placeholder'),...open.map(s=>jsx('option',{value:s.id,children:short(s.title) || s.id},s.id))]}),
+          button('Add',()=>{action('precedence',{pairs:[...state.precedence,[before,after]]});setBefore('');setAfter('')},!before || !after || before===after)]})]}) : null
+    ]}) : null,
+    jsx('div',{role:'status',style:muted,children:message}), mutation.isPending?paragraph('Working…'):null
   ]})
 }
 function Surface(props) {

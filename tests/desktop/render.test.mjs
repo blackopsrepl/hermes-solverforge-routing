@@ -22,7 +22,7 @@ test('exact public SDK surfaces, no app bypasses',()=>{
 })
 test('current road geometry, home, and coordinate controls in plain words',()=>{
  const html=renderPage({data:data(solution),dataUpdatedAt:1})
- for(const text of ['Start','Current supplied origin','Driving','2 min · 1.2 km','Back home · Home &amp; &lt;safe&gt;','Library','Set as start','Add stop','Solve route','Route map']) assert.ok(html.includes(text),text)
+ for(const text of ['Start','Current supplied origin','End','Back to start','Driving','2 min · 1.2 km · 1 stop to go','Itinerary','Library','Go here next','Visited','Remove','Add a stop','Add stop','Route map','Preferences','Return to the start at the end','Then back to start']) assert.ok(html.includes(text),text)
  assert.ok(html.includes(encodeURIComponent(data().map_document)))
  // No self-description: the page talks about the route, never about itself.
  const visible=html.replace(/<[^>]*>/g,' ')
@@ -34,21 +34,25 @@ test('current road geometry, home, and coordinate controls in plain words',()=>{
 })
 test('explicit search controls without autocomplete',()=>{
  const html=renderPage({data:data()})
- for(const text of ['Add a place','Place or address','City or region','Search','Or coordinates']) assert.ok(html.includes(text),text)
+ for(const text of ['Add a stop','Place or address','City or region','Search','Use coordinates instead']) assert.ok(html.includes(text),text)
  assert.ok(source.includes("'/actions/search_locations'"))
  assert.ok(source.includes("action('confirm_location'"))
  assert.ok(!source.includes('onKeyUp'))
 })
-test('unsolved edits show stops, not an itinerary' ,()=>{
+test('unsolved edits show stops and one Plan route action' ,()=>{
  const html=renderPage({data:data()})
- assert.ok(html.includes('Not solved yet'))
+ assert.ok(html.includes('Plan route'))
  assert.ok(html.includes('>Stops<') && !html.includes('Itinerary'))
+ const empty=data();empty.state.origin=null;empty.state.stops=[]
+ const first=renderPage({data:empty})
+ for(const text of ['Where do you start?','Not set yet','Add a start and a stop','Start here']) assert.ok(first.includes(text),text)
+ assert.ok(!first.includes('Route map') && !first.includes('Preferences'),'no empty map, no preferences before a start')
  assert.ok(html.includes(encodeURIComponent(data().map_document)))
 })
 test('directive is read only, loading, errors, missing engine',()=>{
  setFixture({data:data(solution)})
  const card=renderToStaticMarkup(contributions.find(c=>c.area==='directives').data.render({attrs:{}}))
- assert.ok(card.includes('Library') && !card.includes('Mark visited') && !card.includes('Add a place'))
+ assert.ok(card.includes('Library') && !card.includes('Go here next') && !card.includes('Add a stop'))
  assert.ok(renderPage({isPending:true}).includes('Loading route'))
  assert.ok(renderPage({error:new Error('offline')}).includes('Could not load the route'))
  const result=data();result.engine.available=false
@@ -88,11 +92,11 @@ const plan={plan_id:'p'.repeat(32),base_revision:3,expires_at:1900000000,round_t
 test('pending plan shows choices and one apply button, also in the chat card',()=>{
  setFixture({data:{...data(),pending_plan:plan}})
  const card=renderToStaticMarkup(contributions.find(c=>c.area==='directives').data.render({attrs:{}}))
- for(const text of ['Places to add','Start: Shared location (shared 09:12)','One match','Same street name in 2 places (Legnano, Sesto San Giovanni) · none in Milano · choose one','Via Roma, Legnano','street · Legnano · 25.9 km from start','far away','place of worship · Milano · 2.3 km from start','street · Sesto San Giovanni · 5.6 km from start','Not found','Skip','Add 2 places','return home']) assert.ok(card.includes(text),text)
+ for(const text of ['Places to add','Start: Shared location (shared 09:12)','One match','Same street name in 2 places (Legnano, Sesto San Giovanni) · none in Milano · choose one','street · Legnano · 25.9 km from start','far away','place of worship · Milano · 2.3 km from start','street · Sesto San Giovanni · 5.6 km from start','Not found','Skip','Add 2 places','return home']) assert.ok(card.includes(text),text)
  assert.ok(/<button disabled="">Add 2 places</.test(card),'apply waits for the unresolved choice')
  assert.ok(!card.includes('Mark visited'))
  assert.equal(card.split(' · far away').length-1,1,'only the far candidate is flagged')
  const stale=renderPage({data:{...data(),pending_plan:{...plan,base_revision:2}}})
  assert.ok(stale.includes('The route changed since'))
- assert.ok(source.includes("action:'confirm_plan'"))
+ assert.ok(source.includes("run('confirm_plan',args)"))
 })

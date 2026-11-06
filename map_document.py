@@ -20,6 +20,14 @@ def _template() -> str:
 <script>""" + asset("leaflet.js") + "\n</script><script>var SF = {};\n" + asset("sf-map.js") + "\n</script><script id=\"route-data\" type=\"application/json\">__ROUTE_DATA__</script><script>" + asset("guest.js") + "\n</script></body></html>"
 
 
+def _short(title):
+    """Geocoder titles are full postal strings; markers show the place name."""
+    parts = [p.strip() for p in str(title or "").split(",") if p.strip()]
+    if len(parts) > 1 and parts[0].rstrip("abcdefghijklmnopqrstuvwxyz").isdigit():
+        return f"{parts[1]} {parts[0]}"
+    return parts[0] if parts else ""
+
+
 def map_document(state: dict) -> str:
     """Use only this snapshot; never show geometry from an older revision."""
     solution = state.get("solution")
@@ -36,7 +44,7 @@ def map_document(state: dict) -> str:
             ids.append("return")
         elif endpoint:
             ids.append(endpoint["id"])
-    markers = [{"number": i, "title": (places[key].get("title") or ("Start" if key == "origin" else "Home" if key == "return" else "Stop")), "coordinates": places[key]["coordinates"]} for i, key in enumerate(ids) if places.get(key)]
+    markers = [{"number": i, "title": _short(places[key].get("title")) or ("Start" if key == "origin" else "Home" if key == "return" else "Stop"), "coordinates": places[key]["coordinates"]} for i, key in enumerate(ids) if places.get(key)]
     payload = {"markers": markers, "geometry": (solution.get("geometry") or {}).get("coordinates", []) if solution else [], "solved": bool(solution)}
     # JSON lives in a script element: neutralise HTML raw-text terminators, not
     # just JS quotes. Titles enter Leaflet popups as text nodes in the guest.

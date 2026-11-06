@@ -69,28 +69,19 @@ try:
         expect(page.get_by_role('heading', name='Your driving route')).to_be_visible()
         def current():
             return page.request.get(f'http://127.0.0.1:{port}/api/current').json()
-        def confirm():
-            with page.expect_response(lambda r: '/api/actions/' in r.url) as response:
-                page.get_by_role('button', name='Confirm', exact=True).click()
+        def act(control):
+            """One deliberate click edits the route; wait for the write and the refresh."""
+            with page.expect_response(lambda r: '/api/actions/' in r.url and '/search_locations' not in r.url) as response:
+                control.click()
             result = response.value.json()
             assert result['ok'], result
-            expect(page.get_by_role('button', name='Confirm', exact=True)).to_have_count(0)
             expect(page.get_by_role('status')).to_have_text('Route updated.')
             # Refresh completion, not just the mutation response, gates the next edit.
             expect(page.locator(f"section[data-revision='{result['revision']}']").first).to_be_attached()
             return result
-        def place(title, coordinates, action):
-            page.get_by_label('Name', exact=True).fill(title)
-            page.get_by_label('Longitude, latitude', exact=True).fill(coordinates)
-            # Coordinate controls sit after the search results; their labels match.
-            page.get_by_role('button', name=action, exact=True).last.click()
-            before = current()['revision']
-            assert page.get_by_role('alert').count() == 1
-            assert current()['revision'] == before  # selection alone must not write
-            return confirm()
         searches = []
         hint_path = ARTIFACTS / 'search-empty-hint.png'
-        page.get_by_role('heading', name='Add a place', exact=True).locator('..').screenshot(path=str(hint_path))
+        page.get_by_role('heading', name='Where do you start?', exact=True).locator('..').screenshot(path=str(hint_path))
         screenshots.append(str(hint_path))
         chosen_places = []
         def named_place(query, action, wanted, why):
@@ -107,15 +98,15 @@ try:
             assert result['ok'], result
             assert result['candidates'], result
             searches.append(result)
-            expect(page.get_by_role('radio').first).to_be_visible()
-            assert not any(page.get_by_role('radio').nth(i).is_checked() for i in range(page.get_by_role('radio').count())), 'no automatic choice'
+            rows = page.locator('li', has=page.get_by_role('button', name=action, exact=True))
+            expect(rows).to_have_count(len(result['candidates']))
+            assert current()['revision'] == before, 'search alone must not write'
             matching = [i for i, c in enumerate(result['candidates']) if wanted(c)]
             assert matching, f'no candidate is {why}: {[(c["kind"], c["label"]) for c in result["candidates"]]}'
             index = matching[0]
             candidate = result['candidates'][index]
             assert not candidate['far'], candidate
             expect(page.get_by_text(candidate['kind'] + ' · ', exact=False).first).to_be_visible()
-            page.get_by_role('radio').nth(index).check()
             chosen_places.append({'query': query, 'why': why, 'label': candidate['label'], 'kind': candidate['kind'],
                                   'locality': candidate['locality'], 'distance_from_start_m': candidate['distance_from_start_m'],
                                   'rank': index})
@@ -123,18 +114,16 @@ try:
             path = ARTIFACTS / ('search-' + query.replace(' ', '-') + '.png')
             page.screenshot(path=str(path),full_page=True)
             screenshots.append(str(path))
-            page.get_by_role('button',name=action,exact=True).first.click()
-            assert current()['revision'] == before
-            return confirm()
-        named_place('Milano Centrale', 'Set as start', lambda c: c['kind'] == 'railway station' and 'Milano Centrale' in c['label'], 'the railway station')
+            expect(rows.nth(index)).to_contain_text(candidate['label'].split(',')[0])
+            return act(rows.nth(index).get_by_role('button', name=action, exact=True))
+        named_place('Milano Centrale', 'Start here', lambda c: c['kind'] == 'railway station' and 'Milano Centrale' in c['label'], 'the railway station')
         # From here on the route has an origin: searches carry the rounded viewbox.
         first = named_place('Duomo di Milano', 'Add stop', lambda c: c['label'].startswith('Duomo di Milano'), 'the cathedral')['state']['stops'][0]['id']
         assert searches[-1]['viewbox'], 'origin set: search must be biased toward it'
         second = named_place('Castello Sforzesco', 'Add stop', lambda c: c['label'].startswith('Castello Sforzesco'), 'the castle')['state']['stops'][1]['id']
-        page.get_by_role('button',name='Set next',exact=True).nth(1).click()
-        assert confirm()['state']['next_id'] == second
-        page.get_by_role('button',name='Solve route',exact=True).click()
-        result = confirm()
+        assert act(page.get_by_role('button',name='Go here next',exact=True).nth(1))['state']['next_id'] == second
+        expect(page.get_by_text('Going here next', exact=True)).to_be_visible()
+        result = act(page.get_by_role('button',name='Plan route',exact=True))
         assert result['state']['solution']['remaining_order'][0] == second
         assert result['state']['solution']['geometry']['coordinates']
         expect(page.get_by_role('heading', name='Itinerary', exact=True)).to_be_visible()
@@ -244,15 +233,13 @@ try:
         shot('route-tile-failure.png')
         page.unroute('https://*.tile.openstreetmap.org/**')
 
-        page.get_by_text('Options',exact=True).click()
+        expect(page.get_by_role('heading', name='Preferences', exact=True)).to_be_visible()
         expect(page.get_by_label('First',exact=True)).to_be_visible()
         shot('route-constraints.png')
-        page.get_by_text('Options',exact=True).click()
         repaired = named_place('Teatro alla Scala', 'Add stop', lambda c: c['label'].startswith('Teatro alla Scala'), 'the opera house')
         assert repaired['state']['solution'] is None
         assert len(repaired['state']['stops']) == 3
-        page.get_by_role('button',name='Solve route',exact=True).click()
-        repaired = confirm()
+        repaired = act(page.get_by_role('button',name='Plan route',exact=True))
         assert len(repaired['state']['solution']['remaining_order']) == 3
         assert repaired['state']['solution']['remaining_order'][0] == second
         assert repaired['state']['solution']['geometry']['coordinates']
@@ -273,15 +260,14 @@ try:
         response = page.request.post(f'http://127.0.0.1:{port}/api/actions/set_next',data={'expected_revision':stale['revision'],'stop_id':second})
         assert response.ok
         with page.expect_response(lambda r: '/api/actions/remove_stop' in r.url) as refused:
-            page.get_by_role('button',name='Confirm',exact=True).click()
+            page.get_by_role('alert').get_by_role('button',name='Remove',exact=True).click()
         assert refused.value.status == 409
         expect(page.get_by_role('status')).to_contain_text('changed')
         assert len(current()['state']['stops']) == 3
         expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(0)
         shot('route-stale-refusal.png')
         # Visit fixed next, verify moving origin and retained history in real DB.
-        page.get_by_role('button',name='Mark visited',exact=True).nth(1).click()
-        visited = confirm()['state']
+        visited = act(page.get_by_role('button',name='Visited',exact=True).nth(1))['state']
         assert visited['visited'] == [second]
         assert 'Castello Sforzesco' in visited['origin']['title']
         assert 'Milano Centrale' in visited['return_origin']['title']
@@ -369,15 +355,12 @@ try:
         assert current()['revision'] == 0, 'choosing must not write'
         using = [i for i in plan['items'] if i['status'] in ('supplied','preselected','needs_choice')]
         assert len(using) == len(plan['items']), 'every place resolved deliberately'
-        page.get_by_role('button', name=f"Add {len(using)} place{'s' if len(using) != 1 else ''}", exact=True).click()
-        assert current()['revision'] == 0
-        applied = confirm()
+        applied = act(page.get_by_role('button', name=f"Add {len(using)} place{'s' if len(using) != 1 else ''}", exact=True))
         assert applied['revision'] == 1 and len(applied['state']['stops']) == len(using) - 1
         assert applied['state']['origin']['title'] == pin['title']
         expect(page.get_by_role('heading', name='Places to add', exact=True)).to_have_count(0)
         page.goto(f'http://127.0.0.1:{port}')
-        page.get_by_role('button',name='Solve route',exact=True).click()
-        batch_solved = confirm()
+        batch_solved = act(page.get_by_role('button',name='Plan route',exact=True))
         comparison = batch_solved['state']['solution']['comparison']
         solution = batch_solved['state']['solution']
         # Recomputed claim on deliberately chosen, nearby places only.
