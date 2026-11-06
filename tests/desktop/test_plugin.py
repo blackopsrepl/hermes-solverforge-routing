@@ -163,6 +163,16 @@ def test_lone_backend_and_errors(tmp_path, monkeypatch):
     assert client.post('/actions/set_origin',json=[]).json()['error']['code'] == 'invalid_arguments'
     assert client.post('/actions/set_origin').json()['error']['code'] == 'invalid_arguments'
     assert client.post('/actions/set_origin',json={'expected_revision':0,'origin':{'coordinates':[9,45]}}).json()['revision'] == 1
-    assert client.get('/current').json()['revision'] == 1
+    current = client.get('/current').json()
+    assert current['revision'] == 1
+    assert '"coordinates": [9.0, 45.0]' in current['map_document']
+    assert "script-src 'unsafe-inline'" in current['map_document']
+    monkeypatch.setattr(package, 'data_dir', lambda: tmp_path / 'other-profile')
+    other = client.get('/current').json()
+    assert other['revision'] == 0
+    assert '"markers": []' in other['map_document']
+    assert '"coordinates": [9.0, 45.0]' not in other['map_document']
+    monkeypatch.setattr(package, 'data_dir', lambda: tmp_path)
+    assert client.get('/current').json()['map_document'] == current['map_document']
     assert client.post('/actions/set_next',json={'expected_revision':0,'stop_id':None}).status_code == 409
     assert client.post('/actions/install',json={}).json()['error']['code'] == 'unknown_action'

@@ -59,7 +59,7 @@ try:
         browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
         page = browser.new_page(viewport={'width':1280, 'height':1100}, device_scale_factor=1)
         page.on('pageerror', lambda error: errors.append(str(error)))
-        page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' and '409' not in msg.text else None)
+        page.on('console', lambda msg: errors.append(msg.text) if msg.type == 'error' and '409' not in msg.text and 'net::ERR_FAILED' not in msg.text else None)
         page.on('response', lambda response: responses.append({'url':response.url,'status':response.status}) if '/api/' in response.url else None)
         page.goto(f'http://127.0.0.1:{port}')
         expect(page.get_by_role('heading', name='Your driving route')).to_be_visible()
@@ -94,17 +94,73 @@ try:
         assert result['state']['solution']['geometry']['coordinates']
         expect(page.get_by_text('Current for this revision',exact=True)).to_be_visible()
         frame = page.frame_locator('iframe')
-        expect(frame.locator('svg polyline')).to_have_count(1)
-        assert len(frame.locator('svg polyline').get_attribute('points')) > 20
-        expect(frame.locator('svg circle')).to_have_count(3)
+        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
+        assert len(frame.locator('.leaflet-overlay-pane path').get_attribute('d')) > 20
+        expect(frame.locator('.sf-marker-stop')).to_have_count(3)
         assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'map or attribution clipped'
-        expect(frame.get_by_text('Road data © OpenStreetMap contributors · routing OSRM. No external tiles.',exact=True)).to_be_visible()
-        assert page.locator('iframe').get_attribute('sandbox') == ''
+        expect(frame.locator('.leaflet-control-attribution')).to_contain_text('OpenStreetMap contributors')
+        assert page.locator('iframe').get_attribute('sandbox') == 'allow-scripts'
+        expect(frame.locator('.leaflet-tile-loaded').first).to_be_visible(timeout=30000)
+        assert frame.locator('.leaflet-tile-loaded').evaluate_all('(tiles) => tiles.every(t => t.complete && t.naturalWidth === 256)'), 'not actual loaded raster tiles'
+        def map_fits():
+            fits = """el => {
+                const box = el.getBoundingClientRect();
+                return [...el.querySelectorAll('.leaflet-marker-icon,.leaflet-overlay-pane path')].every(marker => {
+                    const r = marker.getBoundingClientRect();
+                    return r.left >= box.left && r.right <= box.right && r.top >= box.top && r.bottom <= box.bottom;
+                });
+            }"""
+            # Leaflet's zoom transition finishes asynchronously after the click.
+            deadline = time.monotonic() + 5
+            while not frame.locator('#map').evaluate(fits) and time.monotonic() < deadline:
+                page.wait_for_timeout(50)
+            assert frame.locator('#map').evaluate(fits), 'route or markers clipped'
+            assert frame.locator('body').evaluate('(body) => body.scrollHeight <= innerHeight'), 'frame disclosure clipped'
+        map_fits()
+        # Exercise real drag and zoom controls, not a JS map.setView shortcut.
+        page.locator('iframe').scroll_into_view_if_needed()
+        route_path = frame.locator('.leaflet-overlay-pane path')
+        original_path = route_path.get_attribute('d')
+        frame.get_by_role('button', name='Zoom in', exact=True).click()
+        expect(route_path).not_to_have_attribute('d', original_path)
+        map_box = frame.locator('#map').bounding_box()
+        pane = frame.locator('.leaflet-map-pane')
+        before_pan = pane.get_attribute('style')
+        x, y = map_box['x'] + map_box['width'] / 2, map_box['y'] + map_box['height'] / 2
+        page.mouse.move(x, y)
+        page.mouse.down()
+        page.mouse.move(x + 100, y + 40, steps=12)
+        page.mouse.up()
+        expect(pane).not_to_have_attribute('style', before_pan)
+        frame.get_by_role('button',name='Fit all stops',exact=True).click()
+        map_fits()
         def shot(name):
             path = ARTIFACTS / name
             page.screenshot(path=str(path),full_page=True)
             screenshots.append(str(path))
         shot('route-solved.png')
+        map_path = ARTIFACTS / 'street-map.png'
+        page.locator('iframe').screenshot(path=str(map_path))
+        screenshots.append(str(map_path))
+        page.set_viewport_size({'width':390,'height':844})
+        frame.get_by_role('button',name='Fit all stops',exact=True).click()
+        map_fits()
+        shot('route-mobile-solved.png')
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile map horizontal overflow'
+        page.set_viewport_size({'width':1280,'height':1100})
+        # Image failure is intentionally injected, never substituted with fake tiles.
+        page.route('https://*.tile.openstreetmap.org/**', lambda route: route.abort())
+        frame.get_by_role('button',name='Zoom in',exact=True).click()
+        expect(frame.locator('#tiles')).to_contain_text('Street tiles unavailable',timeout=15000)
+        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
+        frame.get_by_role('button',name='Fit all stops',exact=True).click()
+        map_fits()
+        expect(frame.locator('#tiles')).to_contain_text('Street tiles unavailable')
+        expect(page.get_by_role('heading',name='Itinerary',exact=True)).to_be_visible()
+        assert current()['revision'] == result['revision'], 'map interactions must not edit the route'
+        shot('route-tile-failure.png')
+        page.unroute('https://*.tile.openstreetmap.org/**')
+
         page.get_by_text('Constraints · 0 order locks · next stop fixed',exact=True).click()
         expect(page.get_by_label('Before stop',exact=True)).to_be_visible()
         shot('route-constraints.png')
@@ -120,7 +176,7 @@ try:
         assert refused.value.status == 409
         expect(page.get_by_role('status')).to_contain_text('changed')
         assert len(current()['state']['stops']) == 2
-        expect(frame.locator('svg polyline')).to_have_count(0)
+        expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(0)
         shot('route-stale-refusal.png')
         # Visit fixed next, verify moving origin and retained history in real DB.
         page.get_by_role('button',name='Mark visited',exact=True).nth(1).click()

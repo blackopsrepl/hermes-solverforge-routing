@@ -10,36 +10,6 @@ const row = { display:'flex', alignItems:'center', flexWrap:'wrap', gap:8 }
 const field = { padding:'9px 12px', borderRadius:7, border:'1px solid var(--ui-stroke-secondary)', background:'var(--ui-bg-primary, transparent)', color:'var(--ui-text-primary)', minWidth:180, flex:1 }
 const paragraph = text => jsx('p', { style:{...muted,margin:'6px 0'}, children: text })
 const label = place => place ? `${place.title || 'Supplied location'} (${place.coordinates.join(', ')})` : 'Not supplied'
-const escape = text => String(text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
-
-export function mapDocument(state) {
-  const solution = state.solution
-  const geometry = solution?.geometry?.coordinates || []
-  const places = new Map([['origin', state.origin], ...state.stops.map(s => [s.id, s])])
-  if (state.endpoint) places.set(state.endpoint.id, state.endpoint)
-  const home = state.return_origin || state.return_location || state.home || state.start_origin
-  if (home) places.set('return', home)
-  const ids = solution?.itinerary_ids || ['origin', ...state.stops.filter(s => !s.visited).map(s => s.id)]
-  const markers = ids.map(id => places.get(id)).filter(Boolean)
-  const project = ([lon, lat]) => [lon * Math.PI / 180, Math.log(Math.tan(Math.PI / 4 + Math.max(-85, Math.min(85, lat)) * Math.PI / 360))]
-  const all = [...geometry, ...markers.map(p => p.coordinates)].map(project)
-  let content = '<text x="30" y="50">Supply an origin and stops to begin.</text>'
-  if (all.length) {
-    const [xmin,xmax,ymin,ymax] = all.reduce(([x0,x1,y0,y1],[x,y]) => [Math.min(x0,x),Math.max(x1,x),Math.min(y0,y),Math.max(y1,y)], [Infinity,-Infinity,Infinity,-Infinity])
-    const scale = Math.min(720 / Math.max(xmax-xmin, 0.00001), 320 / Math.max(ymax-ymin, 0.00001))
-    const point = coordinates => { const [x,y] = project(coordinates); return [400 + (x-(xmin+xmax)/2)*scale, 190 - (y-(ymin+ymax)/2)*scale] }
-    content = geometry.length ? `<polyline fill="none" stroke="#206cbe" stroke-width="4" points="${geometry.map(p => point(p).join(',')).join(' ')}"/>` : ''
-    const groups = new Map()
-    markers.forEach((place, index) => {
-      const key = place.coordinates.join(',')
-      if (!groups.has(key)) groups.set(key,{place,numbers:[]})
-      groups.get(key).numbers.push(index)
-    })
-    content += [...groups.values()].map(({place:p,numbers}) => {const [x,y] = point(p.coordinates); const text = numbers.join('/'); return `<g><title>${escape(label(p))}</title><circle cx="${x}" cy="${y}" r="${Math.max(13,text.length*4)}" fill="#173d65"/><text x="${x}" y="${y+4}" text-anchor="middle" fill="white">${text}</text></g>`}).join('')
-  }
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>body{margin:0;height:100vh;display:flex;flex-direction:column;background:#eef3f6;color:#18344b;font:12px system-ui}svg{display:block;width:100%;flex:1;min-height:0}p{margin:5px 14px}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 380" role="img" aria-label="Schematic geographic road geometry">${content}</svg><p>Schematic geographic road geometry · not a full slippy map</p><p>Road data © OpenStreetMap contributors · routing OSRM. No external tiles.</p></body></html>`
-}
-
 function RoutingSurface({ editable = false, scope }) {
   const client = useQueryClient()
   const key = [ID, ...scope]
@@ -72,7 +42,8 @@ function RoutingSurface({ editable = false, scope }) {
     ]}),
     !data.engine.available ? paragraph('Routing engine missing. Configure the executable path; no automatic download.') : null,
     paragraph(`Solve sends exact coordinates to ${data.provider.url}. Estimated driving only. Best-found, not proven optimal. No live traffic.`),
-    jsx(SandboxedFrame,{src:'data:text/html;charset=utf-8,'+encodeURIComponent(mapDocument({...state,solution:fresh?solution:null})),title:'Read-only schematic geographic road geometry',style:{width:'100%',height:'clamp(260px, 38vw, 390px)',border:'1px solid var(--ui-stroke-secondary)',borderRadius:12}}),
+    data.map_document ? jsx(SandboxedFrame,{src:'data:text/html;charset=utf-8,'+encodeURIComponent(data.map_document),sandbox:'allow-scripts',title:'Interactive OpenStreetMap street map and road route',style:{width:'100%',height:'clamp(360px, 42vw, 480px)',border:'1px solid var(--ui-stroke-secondary)',borderRadius:12,flexShrink:0}}) : paragraph('Street map unavailable. The itinerary remains usable.'),
+    paragraph('Street map tiles © OpenStreetMap contributors. Viewing and panning disclose the visible area and your IP to OpenStreetMap tile servers; the itinerary works if tiles fail.'),
     jsxs('div',{style:panel,children:[
       jsx('h3',{style:{margin:'0 0 12px'},children:fresh?'Itinerary':'Stops awaiting solve · input order, not a proposed route'}),
       order.length ? jsx('ol',{style:{listStyle:'none',padding:0,margin:0},children:order.map((id,index) => { const stop=byId.get(id); if(!stop)return null; return jsxs('li',{style:{...row,padding:'12px 0',borderTop:'1px solid var(--ui-stroke-tertiary)'},children:[jsx('span',{style:{display:'grid',placeItems:'center',width:30,height:30,borderRadius:'50%',background:'var(--ui-accent)',color:'var(--ui-bg-primary, white)',fontWeight:700},children:index+1}),jsxs('div',{style:{flex:1,minWidth:160},children:[jsx('strong',{children:stop.title || 'Supplied location'}),paragraph(`${stop.coordinates.join(', ')}${state.next_id===id?' · fixed next':''}`)]}),editable?jsxs('span',{style:row,children:[button('Set next',()=>action('set_next',{stop_id:id})),button('Mark visited',()=>action('mark_visited',{stop_id:id})),button('Remove',()=>action('remove_stop',{stop_id:id}))]}):null]},id) })}):paragraph('No stops yet. Add a supplied location below.'),

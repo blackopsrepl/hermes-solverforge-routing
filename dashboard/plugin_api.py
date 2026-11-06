@@ -38,6 +38,9 @@ def _config(key, default=None):
 def _call(action, body):
     package = _package()
     result = package.RoutingTools(lambda: package.service(_config)).call("route_" + action, body)
+    if action == "current" and result["ok"]:
+        from importlib import import_module
+        result["map_document"] = import_module(".map_document", package.__name__).map_document(result["state"])
     code = 200 if result["ok"] else {"stale_revision": 409, "engine_missing": 503, "provider_error": 502, "engine_error": 502, "storage_error": 503}.get(result["error"]["code"], 400)
     return JSONResponse(result, status_code=code)
 

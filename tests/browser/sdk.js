@@ -4,7 +4,7 @@ export const ROUTES_AREA='routes', SIDEBAR_NAV_AREA='nav', TRANSCRIPT_DIRECTIVE_
 export const host={state:{connectionId:{get:()=> 'isolated-browser'},profile:{get:()=> 'scratch'}}}
 export const useValue=value=>value.get()
 export const Button=props=>React.createElement('button',props)
-export const SandboxedFrame=props=>React.createElement('iframe',{...props,sandbox:''})
+export const SandboxedFrame=props=>React.createElement('iframe',{...props,sandbox:'allow-scripts',referrerPolicy:'no-referrer'})
 const listeners=new Set()
 export const useQueryClient=()=>({invalidateQueries:()=>listeners.forEach(fn=>fn())})
 export function useQuery({queryFn}) {
