@@ -34,19 +34,31 @@ function QrCode({qr, caption}) {
     jsx('figcaption',{style:{...muted,fontSize:12,textAlign:'center'},children:caption})]})
 }
 function Handoff({nav, showQr, onToggleQr}) {
+  const [picked, setPicked] = useState(null)
   if (!nav) return null
   const points = nav.points
   const group = (name, legs) => legs.length === 1 ? [jsx(ExternalLink,{url:legs[0].url,text:name},name)] : legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:`${name} ${i+1}/${legs.length}`},`${name}${i}`))
   const mobile = nav.google_mobile.legs
+  const apple = nav.apple.legs
+  // One scannable code at a time: a camera pointed at the screen must find
+  // exactly one target, so the phone kind is picked before the scan, not by
+  // chance. Apple defaults (the iPhone case); Google stays as the alternative.
+  const appleReady = apple.some(leg => leg && leg.qr)
+  const provider = picked ?? (appleReady ? 'apple' : 'google')
+  const qrLegs = provider === 'apple' ? apple : mobile
+  const pill = (key, label) => jsx(Button, {onClick:()=>setPicked(key), size:'sm', variant:provider===key?'secondary':'text', children:label}, `provider-${key}`)
   return jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8,borderTop:'1px solid var(--ui-stroke-tertiary)',paddingTop:12},children:[
     jsx('h3',{style:{margin:0,fontSize:14},children:'Navigate'}),
-    jsxs('div',{style:row,children:[...group('Google Maps',nav.google.legs),...group('Apple Maps',nav.apple.legs)]}),
+    jsxs('div',{style:row,children:[...group('Google Maps',nav.google.legs),...group('Apple Maps',apple)]}),
     jsxs('details',{style:muted,children:[jsx('summary',{style:{cursor:'pointer'},children:'OpenStreetMap'}),
       jsx('div',{style:{...row,marginTop:8},children:nav.osm.legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:legName(leg,points)},`osm${i}`))})]}),
     jsx(Button,{onClick:onToggleQr,variant:'text',size:'sm',children:showQr?'Hide QR code':'Send to phone (QR code)'}),
-    showQr ? jsxs('div',{style:{...row,alignItems:'flex-start',gap:16},children:[
-      ...nav.apple.legs.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:nav.apple.legs.length>1?`Part ${i+1}/${nav.apple.legs.length}: ${legName(leg,points)}`:'On iPhone: opens the Apple Maps app'},`qr-apple${i}`)),
-      ...mobile.map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:mobile.length>1?`Part ${i+1}/${mobile.length}: ${legName(leg,points)}`:'On Android: opens Google Maps'},`qr-google${i}`)),
+    showQr ? jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8},children:[
+      jsxs('div',{style:row,children:[
+        appleReady ? pill('apple', 'iPhone → Apple Maps') : null,
+        pill('google', 'Android → Google Maps'),
+      ]}),
+      jsx('div',{style:{...row,alignItems:'flex-start',gap:16},children:qrLegs.filter(leg => leg && leg.qr).map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:qrLegs.length>1?`Part ${i+1}/${qrLegs.length}: ${legName(leg,points)}`:provider==='apple'?'Opens the Apple Maps app':'Opens Google Maps'},`qr-${provider}${i}`))}),
     ]}) : null
   ]})
 }
