@@ -16,6 +16,7 @@ import time
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from playwright.sync_api import sync_playwright, expect
+import cv2
 import uvicorn
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,7 @@ while not server.started:
         raise RuntimeError('Browser test server did not start')
     time.sleep(.05)
 errors, responses, screenshots = [], [], []
+evidence = {}
 passed = False
 try:
     with sync_playwright() as p:
@@ -170,6 +172,40 @@ try:
         map_path = ARTIFACTS / 'street-map.png'
         page.locator('iframe').screenshot(path=str(map_path))
         screenshots.append(str(map_path))
+
+        # Navigation handoff: exact server-built links, plain anchors (no target),
+        # and a real top-level navigation on click (what Electron hands to its
+        # audited external opener). The provider request is intercepted, not sent.
+        navigation = current()['navigation']
+        assert navigation and navigation['revision'] == result['revision']
+        google = page.get_by_role('link', name='Open in Google Maps ↗', exact=True)
+        apple = page.get_by_role('link', name='Open in Apple Maps ↗', exact=True)
+        assert google.get_attribute('href') == navigation['google']['legs'][0]['url']
+        assert apple.get_attribute('href') == navigation['apple']['legs'][0]['url']
+        assert google.get_attribute('target') is None and google.get_attribute('rel') == 'noopener noreferrer'
+        page.locator('summary', has_text='OSM · ').click()
+        osm_links = page.get_by_role('link', name='OSM ·', exact=False)
+        expect(osm_links).to_have_count(len(navigation['osm']['legs']))
+        assert [osm_links.nth(i).get_attribute('href') for i in range(osm_links.count())] == [leg['url'] for leg in navigation['osm']['legs']]
+        qr_svg = page.locator('svg[role=img]').first
+        qr_svg.scroll_into_view_if_needed()
+        qr_path = ARTIFACTS / 'navigation-qr.png'
+        qr_svg.screenshot(path=str(qr_path))
+        screenshots.append(str(qr_path))
+        decoded, corners, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(qr_path)))
+        assert corners is not None and decoded == navigation['google_mobile']['legs'][0]['url'], decoded
+        handoff_path = ARTIFACTS / 'navigation-handoff.png'
+        page.get_by_role('heading', name='Navigate with your maps app', exact=True).locator('..').screenshot(path=str(handoff_path))
+        screenshots.append(str(handoff_path))
+        intercepted = []
+        page.route('https://www.google.com/**', lambda route: (intercepted.append(route.request.url), route.fulfill(status=200, content_type='text/plain', body='intercepted: not sent to Google')))
+        with page.expect_navigation():
+            google.click()
+        assert intercepted == [navigation['google']['legs'][0]['url']] and page.url == intercepted[0]
+        page.unroute('https://www.google.com/**')
+        page.goto(f'http://127.0.0.1:{port}')
+        expect(page.get_by_text('Current for this revision', exact=True)).to_be_visible()
+        evidence['handoff'] = {'navigation': navigation, 'qr_decoded': decoded, 'clicked': intercepted}
         page.set_viewport_size({'width':390,'height':844})
         frame.get_by_role('button',name='Fit all stops',exact=True).click()
         map_fits()
@@ -202,6 +238,11 @@ try:
         assert repaired['state']['solution']['remaining_order'][0] == second
         assert repaired['state']['solution']['geometry']['coordinates']
         (ARTIFACTS/'geocoding-evidence.json').write_text(json.dumps({'searches':searches,'repaired':repaired},indent=2,ensure_ascii=False))
+        repair = repaired['state']['solution']['repair']
+        assert repair and [a['title'] for a in repair['added']] and 'Teatro alla Scala' in repair['added'][0]['title'], repair
+        expect(page.get_by_text('What changed since the last route', exact=True)).to_be_visible()
+        expect(page.get_by_text(repair['summary'], exact=True)).to_be_visible()
+        evidence['repair'] = repair
         expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
         expect(frame.locator('.leaflet-tile-loaded').first).to_be_visible(timeout=30000)
         map_fits()
@@ -230,12 +271,54 @@ try:
         page.set_viewport_size({'width':390,'height':844})
         shot('route-mobile.png')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'horizontal overflow'
+
+        # Batch planning in a fresh profile: agent-style plan through the same
+        # REST/tool boundary with a shared pin as origin, choices and one confirm
+        # in the chat card, then a live solve with an honest savings comparison.
+        package.data_dir = lambda: ARTIFACTS / 'profile-batch'
+        page.set_viewport_size({'width':1280,'height':1100})
+        pin = {'title': 'Shared location (shared ' + time.strftime('%H:%M') + ')', 'coordinates': [9.2045, 45.4862]}
+        places = ['Darsena Milano', 'Arco della Pace', 'Basilica di Sant\'Eustorgio', 'Stazione Porta Garibaldi', 'Via Roma']
+        planned = page.request.post(f'http://127.0.0.1:{port}/api/actions/plan_places', data={'places':[{'query':q} for q in places],'region':'Milano, Italia','origin':pin}).json()
+        assert planned['ok'] and planned['written'] is False, planned
+        plan = planned['plan']
+        assert current()['revision'] == 0 and current()['pending_plan']['plan_id'] == plan['plan_id']
+        page.goto(f'http://127.0.0.1:{port}/?card=1')
+        expect(page.get_by_role('heading', name='Planned places · nothing added yet', exact=True)).to_be_visible()
+        expect(page.get_by_text('Read-only current route', exact=False)).to_be_visible()
+        for item in plan['items']:
+            if item['status'] == 'needs_choice':
+                page.locator(f"input[name='plan-{plan['plan_id']}-{item['index']}']").first.check()
+        shot_card = ARTIFACTS / 'card-pending-plan.png'
+        page.screenshot(path=str(shot_card), full_page=True)
+        screenshots.append(str(shot_card))
+        assert current()['revision'] == 0, 'choosing must not write'
+        using = [i for i in plan['items'] if i['status'] in ('supplied','preselected','needs_choice')]
+        page.get_by_role('button', name=f"Add {len(using)} place{'s' if len(using) != 1 else ''} in one change", exact=True).click()
+        assert current()['revision'] == 0
+        applied = confirm()
+        assert applied['revision'] == 1 and len(applied['state']['stops']) == len(using) - 1
+        assert applied['state']['origin']['title'] == pin['title']
+        expect(page.get_by_role('heading', name='Planned places · nothing added yet', exact=True)).to_have_count(0)
+        page.goto(f'http://127.0.0.1:{port}')
+        page.get_by_role('button',name='Solve road route',exact=True).click()
+        batch_solved = confirm()
+        comparison = batch_solved['state']['solution']['comparison']
+        if comparison['message']:
+            assert comparison['savings_seconds'] >= 60 and comparison['given_respects_locks'] and not comparison['same_as_given']
+            expect(page.get_by_text(comparison['message'], exact=True)).to_be_visible()
+        evidence['batch'] = {'plan': plan, 'applied_revision': applied['revision'], 'comparison': comparison,
+                             'navigation': batch_solved['navigation']}
+        shot('batch-solved.png')
+        page.get_by_role('heading', name='Navigate with your maps app', exact=True).locator('..').screenshot(path=str(ARTIFACTS / 'batch-handoff.png'))
+        screenshots.append(str(ARTIFACTS / 'batch-handoff.png'))
         assert not errors, errors
         passed = True
         browser.close()
 finally:
     server.should_exit = True
     thread.join(timeout=5)
+    (ARTIFACTS/'slice-evidence.json').write_text(json.dumps(evidence,indent=2,ensure_ascii=False))
     receipt = {'passed':passed,'engine':str(ENGINE),'artifacts':str(ARTIFACTS),'screenshots':screenshots,'browser_errors':errors,'api_responses':responses}
     (ARTIFACTS/'receipt.json').write_text(json.dumps(receipt,indent=2))
     print(json.dumps(receipt,indent=2))

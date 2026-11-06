@@ -8,4 +8,6 @@ plugin.register({registerMany:items=>{contributions=items},rest:async(path,optio
  if(!response.ok)throw Error(result.error?.message||`HTTP ${response.status}`)
  return result
 }})
-createRoot(document.getElementById('root')).render(contributions.find(c=>c.area==='routes').render())
+// ?card=1 renders the read-only chat card (directive) instead of the Route page.
+const card=new URLSearchParams(location.search).has('card')
+createRoot(document.getElementById('root')).render(card?contributions.find(c=>c.area==='directives').data.render({attrs:{}}):contributions.find(c=>c.area==='routes').render())

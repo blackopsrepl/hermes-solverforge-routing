@@ -6,7 +6,7 @@ CARGO_TARGET_DIR ?= $(ROOT)engine/target
 export CARGO_TARGET_DIR
 ROUTING_ENGINE ?= $(CARGO_TARGET_DIR)/release/solverforge-routing
 export ROUTING_ENGINE
-PYTEST := uv run --no-project --python 3.12 --with pytest --with fastapi --with httpx --with pyyaml pytest --import-mode=importlib
+PYTEST := uv run --no-project --python 3.12 --with pytest --with fastapi --with httpx --with pyyaml --with opencv-python-headless --with numpy pytest --import-mode=importlib
 
 .PHONY: help engine test test-engine test-plugin test-desktop lint validate check live
 help:

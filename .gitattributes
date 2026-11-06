@@ -1,3 +1,4 @@
 # Preserve byte-identical upstream source and its provenance checksums.
 assets/map/leaflet.css -text whitespace=cr-at-eol
 assets/map/Leaflet-LICENSE -text whitespace=cr-at-eol
+vendor/qrcodegen.py -text -whitespace

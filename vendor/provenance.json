@@ -1,0 +1,16 @@
+{
+  "qrcodegen": {
+    "project": "Project Nayuki QR Code generator library (Python)",
+    "homepage": "https://www.nayuki.io/page/qr-code-generator-library",
+    "repository": "https://github.com/nayuki/QR-Code-generator",
+    "license": "MIT",
+    "pypi_sdist": "https://pypi.org/project/qrcodegen/1.8.0/",
+    "version": "1.8.0",
+    "sdist_sha256": "82db61f5065b6ba6d7606115b9413abdafdf3fe9c2810047100d08eced186e9e",
+    "modified": false
+  },
+  "sha256": {
+    "qrcodegen.py": "b089855caf16185c61421ea4927c1b213cf9468940d71fa8ab11ef83662dcc84",
+    "qrcodegen-LICENSE": "a77a9fa0b239d2a669bdbcc4ec9072005b95fbf14b8d7ebe6a742e43c230119b"
+  }
+}

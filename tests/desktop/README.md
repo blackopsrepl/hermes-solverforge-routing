@@ -22,10 +22,16 @@ also verifies no transient generic `providers`/`store` module aliases are publis
 For actual headless Chromium click flows with real REST/core/Rust/live roads, see
 [`../browser/README.md`](../browser/README.md).
 
+`test_plugin.py` also drives batch plan → confirm → solve over REST with the real
+Rust engine (synthetic geocoder/roads), checking one-revision application, refusal
+without writes, savings, links in tool results and QR codes in the REST read.
+
 `render.test.mjs` renders the actual Desktop module through React server rendering
 with a small SDK stand-in. It checks page/directive registration, read-only chat
 cards, current versus pending state, geometry generation, stable return-home
-markers, safe title escaping and plain driving/optimality disclosures. Its sandbox
+markers, safe title escaping and plain driving/optimality disclosures, navigation
+links (only exact provider prefixes, no `target`), inline QR SVG, rejection of unsafe
+links/QR paths, savings and repair text, and the pending plan in page and chat card. Its sandbox
 stand-in preserves frame properties; it does not emulate Electron, host permission
 policy or actual frame loading. These tests do **not** verify a live Desktop UI or
 click flows. No user Desktop control, profile installation, engine download or

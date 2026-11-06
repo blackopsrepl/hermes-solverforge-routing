@@ -133,6 +133,75 @@ def validate_result(request: dict, result: Any) -> list[int]:
     return order
 
 
+def _minutes(seconds: int) -> str:
+    return f"{seconds // 60} min"
+
+
+def compare_with_given(request: dict, given: list[int], order: list[int], solved_seconds: int) -> dict:
+    """Cost the user's own order on the same matrix; claim savings only when real.
+
+    A saving is stated only when the given order is a valid alternative (it keeps
+    the fixed next stop and order locks), differs from the result, and the
+    result is at least one whole minute shorter. Minutes are rounded down.
+    """
+    matrix = request["matrix"]
+    given_seconds = sum(matrix[a][b] for a, b in zip(given, given[1:]))
+    visits = given[:-1] if request["round_trip"] and len(given) > 1 else given
+    positions = {v: i for i, v in enumerate(visits)}
+    respects = all(positions[a] < positions[b] for a, b in request["precedence"])
+    if request.get("fixed_first") is not None:
+        respects = respects and len(given) > 1 and given[1] == request["fixed_first"]
+    savings = given_seconds - solved_seconds
+    same = given == order
+    message, note = None, None
+    if same:
+        note = "This is the order you gave; it was already the best found."
+    elif not respects:
+        note = "The order you gave breaks your fixed-next or order locks, so no saving is claimed."
+    elif savings >= 60:
+        message = f"{_minutes(savings)} shorter than the order you gave"
+    elif savings >= 0:
+        note = "Less than a minute different from the order you gave."
+    else:
+        note = f"The order you gave is estimated {_minutes(-savings)} shorter than the best found; consider keeping it."
+    return {"given_order_ids": [request["stop_ids"][i] for i in given], "given_duration_seconds": given_seconds,
+            "savings_seconds": savings, "same_as_given": same, "given_respects_locks": respects,
+            "message": message, "note": note,
+            "basis": "Same OSRM driving-time matrix as the optimiser (each leg rounded up to whole seconds)."}
+
+
+def repair_diff(state: dict, solution: dict) -> dict | None:
+    """What a repair changed relative to the previous published solution."""
+    previous = state.get("last_solution")
+    if not previous or type(previous.get("revision")) is not int or previous["revision"] >= solution["revision"]:
+        return None
+    old, new = list(previous.get("remaining_order") or []), list(solution["remaining_order"])
+    visited_now = set(state["visited"])
+    labels = {**(previous.get("labels") or {}), **solution.get("labels", {})}
+    def entry(stop_id, **extra):
+        return {"id": stop_id, "title": labels.get(stop_id) or "Supplied location", **extra}
+    added = [entry(s, position=new.index(s) + 1) for s in new if s not in old]
+    removed = [entry(s) for s in old if s not in new and s not in visited_now]
+    visited = [entry(s) for s in old if s not in new and s in visited_now]
+    common_old, common_new = [s for s in old if s in new], [s for s in new if s in old]
+    moved = [entry(s, previous_position=old.index(s) + 1, position=new.index(s) + 1)
+             for s in common_new if common_old.index(s) != common_new.index(s)]
+    delta = None
+    if type(previous.get("duration_seconds")) is int:
+        delta = solution["duration_seconds"] - previous["duration_seconds"]
+    parts = []
+    for items, word in ((added, "added"), (removed, "removed"), (visited, "visited")):
+        if items:
+            parts.append(f"{len(items)} stop{'s' if len(items) != 1 else ''} {word}")
+    if moved:
+        parts.append(f"{len(moved)} stop{'s' if len(moved) != 1 else ''} changed position")
+    if delta is not None:
+        parts.append("same estimated driving time" if abs(delta) < 60 else
+                     f"{_minutes(abs(delta))} {'longer' if delta > 0 else 'shorter'} than the previous route")
+    return {"previous_revision": previous["revision"], "added": added, "removed": removed, "visited": visited,
+            "moved": moved, "duration_delta_seconds": delta,
+            "summary": " · ".join(parts) if parts else "No change from the previous route"}
+
 class RouteService:
     def __init__(self, database_path: str | Path, *, provider=None, engine=None, max_stops: int = 80, geocoder=None):
         if type(max_stops) is not int or not 1 <= max_stops <= 98:
@@ -146,6 +215,48 @@ class RouteService:
         else:
             from geocoding import LocationSearch, NominatimGeocoder
         self.locations = LocationSearch(self.store, geocoder if geocoder is not None else NominatimGeocoder())
+        if __package__:
+            from .planning import BatchPlanner
+        else:
+            from planning import BatchPlanner
+        self.planner = BatchPlanner(self.store, self.locations, location, max_stops)
+
+    def plan_places(self, places, region: str = "", origin=None, round_trip=None, **kwargs) -> dict:
+        """Search every place and store one pending plan; never edits the route."""
+        if set(kwargs) - {"endpoint"}:
+            raise ValueError("unknown plan fields")
+        return self.planner.plan(places, region=region, origin=origin, round_trip=round_trip,
+                                 endpoint=kwargs.get("endpoint", ...))
+
+    def pending_plan(self):
+        return self.planner.current()
+
+    def confirm_plan(self, plan_id: str, choices=(), skip=(), *, expected_revision: int) -> dict:
+        if type(expected_revision) is not int or expected_revision < 0:
+            raise ValueError("expected_revision must be a nonnegative integer")
+        def apply(state, plan, selected):
+            for item, place in selected:
+                place = location(place)
+                if item["role"] == "origin":
+                    state.update(origin=place, return_origin=location(place))
+                elif item["role"] == "endpoint":
+                    state["endpoint"] = {**place, "id": "endpoint:" + uuid4().hex}
+                else:
+                    state["stops"].append({**place, "id": uuid4().hex, "visited": False})
+            if plan["endpoint_action"] == "clear":
+                state["endpoint"] = None
+            if plan["round_trip"] is not None:
+                state["round_trip"] = plan["round_trip"]
+            # An explicit new end replaces the other end policy, and vice versa.
+            if plan["round_trip"]:
+                state["endpoint"] = None
+            elif any(item["role"] == "endpoint" for item, _ in selected):
+                state["round_trip"] = False
+            if state["origin"] is None:
+                raise ValueError("the plan leaves the route without an origin")
+            if len(state["stops"]) > self.max_stops:
+                raise ValueError("maximum stops exceeded")
+        return self.planner.confirm(plan_id, list(choices), list(skip), expected_revision, apply)
 
     def search_locations(self, query: str, region: str = "") -> dict:
         return self.locations.search(query, region)
@@ -313,7 +424,10 @@ class RouteService:
             solution = {"revision": revision, "order": state["visited"][:], "remaining_order": [],
                         "duration_seconds": 0, "hard_feasible": True, "optimal": True,
                         "score": "0hard/0soft", "geometry": None, "distance_m": 0,
-                        "road_duration_seconds": 0, "next_id": None}
+                        "road_duration_seconds": 0, "next_id": None, "labels": {},
+                        "comparison": {"given_order_ids": [], "given_duration_seconds": 0, "savings_seconds": 0,
+                                       "same_as_given": True, "given_respects_locks": True, "message": None}}
+            solution["repair"] = repair_diff(state, solution)
             return self.store.publish(revision, solution)
         raw = self.provider.matrix(points)
         if not isinstance(raw, list) or len(raw) != len(points) or any(not isinstance(row, list) or len(row) != len(points) for row in raw):
@@ -338,10 +452,16 @@ class RouteService:
         order = validate_result(request, result)
         road = self.provider.route([points[i] for i in order])
         remaining = [ids[i] for i in order if i != 0 and i != destination]
+        # The order the user gave: origin, unvisited stops as entered, then the
+        # same terminal. Costed on the exact matrix the engine optimised.
+        given = list(range(len(stops) + 1)) + ([destination] if destination is not None else []) + ([0] if close_to_start else [])
         solution = {"revision": revision, "order": state["visited"] + remaining,
                     "remaining_order": remaining, "duration_seconds": result["duration_seconds"],
                     "hard_feasible": True, "optimal": result["optimal"], "score": result["score"],
                     "geometry": road["geometry"], "distance_m": road["distance_m"],
                     "road_duration_seconds": road["duration_seconds"],
-                    "next_id": state["next_id"], "itinerary_ids": [ids[i] for i in order]}
+                    "next_id": state["next_id"], "itinerary_ids": [ids[i] for i in order],
+                    "labels": {stop["id"]: stop["title"] for stop in stops},
+                    "comparison": compare_with_given(request, given, order, result["duration_seconds"])}
+        solution["repair"] = repair_diff(state, solution)
         return self.store.publish(revision, solution)

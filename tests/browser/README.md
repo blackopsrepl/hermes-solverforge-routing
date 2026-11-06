@@ -19,7 +19,7 @@ npm exec --yes --package=esbuild -- esbuild tests/browser/entry.js --bundle \
 TMPDIR="$HOME/.hermes/cache/scratch" \
   env -u PYTHONPATH -u PYTHONHOME ROUTING_ENGINE=/absolute/path/to/solverforge-routing \
   uv run --no-project --python 3.12 --with playwright --with fastapi --with uvicorn \
-  python tests/browser/run.py
+  --with opencv-python-headless python tests/browser/run.py
 ```
 
 `ROUTING_ENGINE` defaults to `engine/target/release/solverforge-routing`; a missing
@@ -40,10 +40,23 @@ The flow explicitly searches public Milan landmarks with region context, chooses
 - Deliberately aborted tile-image requests produce a visible warning; the road
   overlay and itinerary remain available. Expected `net::ERR_FAILED` console
   messages from that injected failure are ignored, not CSP or JavaScript errors.
+- Navigation handoff after the live solve: Google/Apple/OSM hrefs equal the API's
+  links, anchors carry no `target`, clicking Google performs a real top-level
+  navigation to exactly that URL (intercepted and answered locally, never sent to
+  Google), and the rendered QR code, screenshotted from Chromium, decodes with OpenCV
+  to the exact phone link.
+- The repair after adding Teatro alla Scala shows the “What changed” diff.
+- Batch planning in a fresh profile: an agent-style `plan_places` request (shared-pin
+  origin plus five Milan names, live Nominatim) writes nothing; the chat card
+  (`?card=1`) shows the pending plan, ambiguous items are chosen, and one Add +
+  Confirm applies all in one revision; a live solve reports savings only when the
+  comparison fields justify them.
 - Constraints, stale-write refusal and mark visited use real API state. Writes
   require confirmation, stale geometry disappears, and return-home stays stable.
 
-A receipt plus full-page screenshots and a cropped `street-map.png` are written
+A receipt, `slice-evidence.json` (links, decoded QR, repair diff, batch plan and
+comparison), full-page screenshots and cropped `street-map.png`, `navigation-qr.png`,
+`navigation-handoff.png`, `card-pending-plan.png` and `batch-handoff.png` are written
 into a fresh `routing-browser-*` scratch directory. The receipt records pass/fail,
 engine, browser errors, API statuses and screenshot paths. Inspect the street map,
 solved mobile layout and tile-failure screenshot before accepting. These are

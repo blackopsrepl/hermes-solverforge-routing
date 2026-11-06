@@ -37,7 +37,7 @@ def _config(key, default=None):
 
 def _call(action, body):
     package = _package()
-    result = package.RoutingTools(lambda: package.service(_config)).call("route_" + action, body)
+    result = package.RoutingTools(lambda: package.service(_config), qr=action == "current").call("route_" + action, body)
     if action == "current" and result["ok"]:
         from importlib import import_module
         result["map_document"] = import_module(".map_document", package.__name__).map_document(result["state"])

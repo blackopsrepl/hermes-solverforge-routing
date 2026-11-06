@@ -62,6 +62,12 @@ class RouteStore:
             state = decode_state(encoded)
             edit(state)
             state["revision"] = revision + 1
+            # Keep a compact copy of the last published solution so the next
+            # solve can report what the repair changed. Never shown as current.
+            if state.get("solution"):
+                previous = state["solution"]
+                state["last_solution"] = {key: previous.get(key) for key in
+                                          ("revision", "remaining_order", "duration_seconds", "labels")}
             state["solution"] = None
             db.execute("UPDATE personal_route SET revision=?,state=? WHERE id=1", (state["revision"], json.dumps(state, allow_nan=False)))
         return state

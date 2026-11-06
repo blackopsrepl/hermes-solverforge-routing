@@ -25,7 +25,10 @@ test('current road geometry, stable home, driving disclaimers and coordinate con
  for(const text of ['Current for this revision','Stable return home','Current supplied origin','Library','Best-found, not proven optimal','Estimated driving: 2 min','Set origin','Add stop','Solve road route','Interactive OpenStreetMap']) assert.ok(html.includes(text),text)
  assert.ok(html.includes(encodeURIComponent(data().map_document)))
  assert.ok(html.includes('tiles fail'))
- assert.ok(!/\beval\(|new Function|import\(|\bfetch\(|https?:/.test(source))
+ // The only literal URLs are the exact provider prefixes used to sanitise links.
+ const prefixes=source.match(/const LINK_PREFIXES = \[[^\]]*\]/)[0]
+ assert.ok(!/\beval\(|new Function|import\(|\bfetch\(|https?:/.test(source.replace(prefixes,'')))
+ assert.ok(!/target\s*:|_blank|window\.open/.test(source),'links must not use target/_blank (Electron denies them)')
 })
 test('explicit search controls and disclosure without autocomplete',()=>{
  const html=renderPage({data:data()})
@@ -49,4 +52,45 @@ test('directive is read only, loading, errors, missing engine',()=>{
  assert.ok(renderPage({error:new Error('offline')}).includes('Could not load route'))
  const result=data();result.engine.available=false
  assert.ok(renderPage({data:result}).includes('Routing engine missing'))
+})
+
+const G='https://www.google.com/maps/dir/?api=1&origin=45.020000%2C9.020000&destination=45.000000%2C9.000000&travelmode=driving&waypoints=45.010000%2C9.010000'
+const A='https://maps.apple.com/directions?source=45.020000,9.020000&destination=45.000000,9.000000&waypoint=45.010000,9.010000&mode=driving'
+const O1='https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=45.020000%2C9.020000%3B45.010000%2C9.010000'
+const O2='https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=45.010000%2C9.010000%3B45.000000%2C9.000000'
+const qr={size:21,path:'M4,4h1v1h-1zM6,4h1v1h-1z',svg:'<svg></svg>'}
+const points=[0,1,2].map(n=>({number:n,id:String(n),title:'P'+n,coordinates:[9,45]}))
+function nav(extra={}){return {revision:3,points,google:{max_waypoints:9,split:false,legs:[{from:0,to:2,url:G}]},google_mobile:{max_waypoints:3,split:false,legs:[{from:0,to:2,url:G,qr}]},apple:{legs:[{from:0,to:2,url:A}]},osm:{legs:[{from:0,to:1,url:O1},{from:1,to:2,url:O2}]},disclosure:'Opening a link or scanning a code sends these stop coordinates (not titles) to that provider.',...extra}}
+const valued={...solution,comparison:{message:'9 min shorter than the order you gave'},repair:{summary:'1 stop added · 2 min longer than the previous route',added:[{id:'one',title:'Library',position:1}],removed:[{id:'x',title:'Old cafe'}],visited:[],moved:[]}}
+test('navigation handoff: sanitised external links, per-leg OSM, inline QR and disclosure',()=>{
+ const html=renderPage({data:{...data(valued),navigation:nav()}})
+ const amp=u=>u.replaceAll('&','&amp;')
+ for(const url of [G,A,O1,O2]) assert.ok(html.includes(`href="${amp(url)}"`),url)
+ for(const text of ['Open in Google Maps ↗','Open in Apple Maps ↗','OSM · 2 legs','Scan with your phone','sends these stop coordinates']) assert.ok(html.includes(text),text)
+ assert.ok(html.includes('rel="noopener noreferrer"') && !html.includes('target='))
+ assert.ok(html.includes('<svg role="img"') && html.includes('d="M4,4h1v1h-1zM6,4h1v1h-1z"') && html.includes('viewBox="0 0 21 21"'))
+ assert.ok(html.includes('9 min shorter than the order you gave'))
+ assert.ok(html.includes('What changed since the last route') && html.includes('Added Library as stop 1') && html.includes('Removed Old cafe'))
+})
+test('unsafe or unknown links and malformed QR are never rendered',()=>{
+ const bad=nav({google:{legs:[{from:0,to:2,url:'javascript:alert(1)'}]},apple:{legs:[{from:0,to:2,url:'https://evil.example/maps.apple.com/directions?'}]},osm:{legs:[{from:0,to:1,url:'http://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=1'}]},google_mobile:{legs:[{from:0,to:2,url:G,qr:{size:21,path:'M0,0"/><script>'}}]}})
+ const html=renderPage({data:{...data(solution),navigation:bad}})
+ assert.ok(!html.includes('javascript:') && !html.includes('evil.example') && !html.includes('http://www.openstreetmap'))
+ assert.ok(!html.includes('<script>') && !html.includes('<svg role="img"'))
+ assert.ok(!renderPage({data:{...data(),navigation:nav()}}).includes('Open in Google Maps'),'no handoff for an unsolved revision')
+})
+const plan={plan_id:'p'.repeat(32),base_revision:3,expires_at:1900000000,round_trip:true,endpoint_action:'keep',items:[
+ {index:0,role:'origin',status:'supplied',query:null,location:{title:'Shared location (shared 09:12)',coordinates:[9.17,45.47]},candidates:[]},
+ {index:1,role:'stop',status:'preselected',query:'Duomo',region:'Milano',preselected:'a'.repeat(32),candidates:[{candidate_id:'a'.repeat(32),label:'Duomo di Milano',coordinates:[9.19,45.46]}]},
+ {index:2,role:'stop',status:'needs_choice',query:'San Marco',region:'Milano',preselected:null,candidates:[{candidate_id:'b'.repeat(32),label:'San Marco, Milano',coordinates:[9.18,45.47]},{candidate_id:'c'.repeat(32),label:'San Marco, Venezia',coordinates:[12.3,45.4]}]},
+ {index:3,role:'stop',status:'no_match',query:'Nowhere',region:'Milano',preselected:null,candidates:[]}]}
+test('pending plan shows choices and one apply button, also in the chat card',()=>{
+ setFixture({data:{...data(),pending_plan:plan}})
+ const card=renderToStaticMarkup(contributions.find(c=>c.area==='directives').data.render({attrs:{}}))
+ for(const text of ['Planned places · nothing added yet','Start: Shared location (shared 09:12)','One place found · pre-selected','2 possible places · choose one','San Marco, Venezia','No map match','Skip this place','Choose a match or skip for 1 place','Add 2 places in one change','return home']) assert.ok(card.includes(text),text)
+ assert.ok(/<button disabled="">Add 2 places in one change/.test(card),'apply waits for the unresolved choice')
+ assert.ok(!card.includes('Mark visited'))
+ const stale=renderPage({data:{...data(),pending_plan:{...plan,base_revision:2}}})
+ assert.ok(stale.includes('The route changed after this plan was made'))
+ assert.ok(source.includes("action:'confirm_plan'"))
 })

@@ -214,3 +214,63 @@ def test_search_confirmation_api_contract_and_profile_scope(tmp_path, monkeypatc
     assert client.post('/actions/confirm_location', json=body).status_code == 400
     assert client.get('/current').json()['revision'] == 0
     assert len(calls) == 1
+
+
+def test_batch_plan_navigation_and_value_over_rest_with_real_engine(tmp_path, monkeypatch):
+    assert ENGINE.is_file(), 'required actual Rust engine is missing'
+    api = load('routing_plan_dashboard_test', ROOT / 'dashboard/plugin_api.py')
+    package = api._package()
+    monkeypatch.setattr(package, 'data_dir', lambda: tmp_path / 'one')
+    monkeypatch.setattr(api, '_config', lambda key, default=None: str(ENGINE) if key == 'binary' else default)
+    import importlib
+    geocoding = importlib.import_module('.geocoding', package.__name__)
+    providers = importlib.import_module('.providers', package.__name__)
+    answers = {'Duomo': [{'label':'Duomo di Milano','coordinates':[9.1919,45.4642]}],
+               'San Marco': [{'label':'San Marco, Milano','coordinates':[9.188,45.478]}, {'label':'San Marco, Venezia','coordinates':[12.34,45.43]}],
+               'Castello': [{'label':'Castello Sforzesco','coordinates':[9.1795,45.4705]}]}
+    monkeypatch.setattr(geocoding.NominatimGeocoder, 'search', lambda self, q, r: answers[q])
+    # Synthetic roads (explicit, offline): seconds proportional to longitude gap.
+    monkeypatch.setattr(providers.OSRMProvider, 'matrix', lambda self, pts: [[round(abs(a[0]-b[0])*10000) for b in pts] for a in pts])
+    monkeypatch.setattr(providers.OSRMProvider, 'route', lambda self, pts: {'geometry':{'type':'LineString','coordinates':pts},'distance_m':1000,'duration_seconds':600})
+    app = FastAPI(); app.include_router(api.router)
+    client = TestClient(app)
+    pin = {'title':'Shared location (shared 09:12)','coordinates':[9.17,45.47]}
+    planned = client.post('/actions/plan_places', json={'places':[{'query':'Duomo'},{'query':'San Marco'},{'query':'Castello'}],'region':'Milano','origin':pin}).json()
+    assert planned['ok'] and planned['written'] is False and planned['revision'] == 0
+    plan = planned['plan']
+    current = client.get('/current').json()
+    assert current['revision'] == 0 and current['pending_plan']['plan_id'] == plan['plan_id']
+    body = {'plan_id':plan['plan_id'],'expected_revision':0,'choices':[]}
+    refused = client.post('/actions/confirm_plan', json=body)
+    assert refused.status_code == 400 and 'skip items [2]' in refused.json()['error']['message']
+    assert client.get('/current').json()['revision'] == 0
+    body['choices'] = [{'index':2,'candidate_id':plan['items'][2]['candidates'][0]['candidate_id']}]
+    assert client.post('/actions/confirm_plan', json={**body,'expected_revision':5}).status_code == 409
+    applied = client.post('/actions/confirm_plan', json=body).json()
+    assert applied['revision'] == 1 and len(applied['state']['stops']) == 3 and applied['navigation'] is None
+    assert client.get('/current').json()['pending_plan'] is None
+    solved = client.post('/actions/solve', json={'expected_revision':1,'solve_seconds':1}).json()
+    assert solved['ok'], solved
+    comparison = solved['state']['solution']['comparison']
+    # Given: 9.17→9.1919→9.188→9.1795 = 219+39+85 = 343 s; best 9.17→9.1795→9.188→9.1919 = 95+85+39 = 219 s.
+    assert comparison['given_duration_seconds'] == 343 and solved['state']['solution']['duration_seconds'] == 219
+    assert comparison['message'] == '2 min shorter than the order you gave'
+    nav = solved['navigation']
+    assert nav['google']['legs'][0]['url'].startswith('https://www.google.com/maps/dir/?api=1&origin=45.470000%2C9.170000')
+    assert 'qr' not in nav['google_mobile']['legs'][0], 'tool/REST action results carry links only'
+    rest = client.get('/current').json()['navigation']
+    assert rest['google_mobile']['legs'][0]['qr']['svg'].startswith('<svg')
+    tools = package.RoutingTools(lambda: package.service(api._config))
+    tool_nav = tools.call('route_current', {})['navigation']
+    assert tool_nav['google'] == rest['google'] and 'qr' not in tool_nav['google_mobile']['legs'][0]
+
+
+def test_bundled_skill_covers_shared_location_and_new_tools():
+    skill = (ROOT / 'skills/routing/SKILL.md').read_text()
+    for text in ['Shared location', 'one-time origin, not tracking', 'never treat live updates as tracking',
+                 'Never invent', 'no geolocation', '[longitude, latitude]', 'route_plan_places', 'route_confirm_plan',
+                 'shorter than the order you', 'repair.summary', 'never truncated', 'sends the stop coordinates']:
+        assert text in skill, text
+    schemas = {s['name']: s for s in pkg.SCHEMAS}
+    assert 'expected_revision' not in schemas['route_plan_places']['parameters']['properties']
+    assert schemas['route_confirm_plan']['parameters']['required'] == ['plan_id', 'expected_revision']
