@@ -77,23 +77,20 @@ try:
             expect(page.get_by_role('button', name='Confirm', exact=True)).to_have_count(0)
             expect(page.get_by_role('status')).to_have_text('Route updated.')
             # Refresh completion, not just the mutation response, gates the next edit.
-            expect(page.get_by_text(f"revision {result['revision']}", exact=False).first).to_be_visible()
+            expect(page.locator(f"section[data-revision='{result['revision']}']").first).to_be_attached()
             return result
         def place(title, coordinates, action):
-            page.get_by_label('Location title', exact=True).fill(title)
+            page.get_by_label('Name', exact=True).fill(title)
             page.get_by_label('Longitude, latitude', exact=True).fill(coordinates)
-            page.get_by_role('button', name=action, exact=True).click()
+            # Coordinate controls sit after the search results; their labels match.
+            page.get_by_role('button', name=action, exact=True).last.click()
             before = current()['revision']
             assert page.get_by_role('alert').count() == 1
             assert current()['revision'] == before  # selection alone must not write
             return confirm()
         searches = []
-        # Empty query: a neutral disclosure, never an empty quoted string.
-        hint = page.get_by_text('Search sends the place and region you type', exact=False)
-        expect(hint).to_be_visible()
-        assert '“”' not in page.locator('body').inner_text()
         hint_path = ARTIFACTS / 'search-empty-hint.png'
-        page.get_by_role('heading', name='Find an address or place', exact=True).locator('..').screenshot(path=str(hint_path))
+        page.get_by_role('heading', name='Add a place', exact=True).locator('..').screenshot(path=str(hint_path))
         screenshots.append(str(hint_path))
         chosen_places = []
         def named_place(query, action, wanted, why):
@@ -101,10 +98,9 @@ try:
             before = current()['revision']
             count = len([r for r in responses if '/actions/search_locations' in r['url']])
             page.get_by_label('Place or address', exact=True).fill(query)
-            page.get_by_label('Region context', exact=True).fill('Milano, Italia')
+            page.get_by_label('City or region', exact=True).fill('Milano, Italia')
             page.wait_for_timeout(150)
             assert count == len([r for r in responses if '/actions/search_locations' in r['url']]), 'typing must not search'
-            expect(page.get_by_text(f'Search sends exactly “{query}, Milano, Italia”', exact=False)).to_be_visible()
             with page.expect_response(lambda r:'/actions/search_locations' in r.url) as response:
                 page.get_by_role('button',name='Search',exact=True).click()
             result = response.value.json()
@@ -127,21 +123,21 @@ try:
             path = ARTIFACTS / ('search-' + query.replace(' ', '-') + '.png')
             page.screenshot(path=str(path),full_page=True)
             screenshots.append(str(path))
-            page.get_by_role('button',name=action,exact=True).click()
+            page.get_by_role('button',name=action,exact=True).first.click()
             assert current()['revision'] == before
             return confirm()
-        named_place('Milano Centrale', 'Use as origin', lambda c: c['kind'] == 'railway station' and 'Milano Centrale' in c['label'], 'the railway station')
+        named_place('Milano Centrale', 'Set as start', lambda c: c['kind'] == 'railway station' and 'Milano Centrale' in c['label'], 'the railway station')
         # From here on the route has an origin: searches carry the rounded viewbox.
-        first = named_place('Duomo di Milano', 'Add named stop', lambda c: c['label'].startswith('Duomo di Milano'), 'the cathedral')['state']['stops'][0]['id']
+        first = named_place('Duomo di Milano', 'Add stop', lambda c: c['label'].startswith('Duomo di Milano'), 'the cathedral')['state']['stops'][0]['id']
         assert searches[-1]['viewbox'], 'origin set: search must be biased toward it'
-        second = named_place('Castello Sforzesco', 'Add named stop', lambda c: c['label'].startswith('Castello Sforzesco'), 'the castle')['state']['stops'][1]['id']
+        second = named_place('Castello Sforzesco', 'Add stop', lambda c: c['label'].startswith('Castello Sforzesco'), 'the castle')['state']['stops'][1]['id']
         page.get_by_role('button',name='Set next',exact=True).nth(1).click()
         assert confirm()['state']['next_id'] == second
-        page.get_by_role('button',name='Solve road route',exact=True).click()
+        page.get_by_role('button',name='Solve route',exact=True).click()
         result = confirm()
         assert result['state']['solution']['remaining_order'][0] == second
         assert result['state']['solution']['geometry']['coordinates']
-        expect(page.get_by_text('Current for this revision',exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='Itinerary', exact=True)).to_be_visible()
         frame = page.frame_locator('iframe')
         expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
         assert len(frame.locator('.leaflet-overlay-pane path').get_attribute('d')) > 20
@@ -181,7 +177,7 @@ try:
         page.mouse.move(x + 100, y + 40, steps=12)
         page.mouse.up()
         expect(pane).not_to_have_attribute('style', before_pan)
-        frame.get_by_role('button',name='Fit all stops',exact=True).click()
+        frame.get_by_role('button',name='Fit',exact=True).click()
         map_fits()
         def shot(name):
             # Chromium may not repaint an offscreen opaque-origin iframe after
@@ -206,8 +202,8 @@ try:
         assert google.get_attribute('href') == navigation['google']['legs'][0]['url']
         assert apple.get_attribute('href') == navigation['apple']['legs'][0]['url']
         assert google.get_attribute('target') is None and google.get_attribute('rel') == 'noopener noreferrer'
-        page.locator('summary', has_text='OSM · ').click()
-        osm_links = page.get_by_role('link', name='OSM ·', exact=False)
+        page.locator('summary', has_text='OpenStreetMap').click()
+        osm_links = page.locator('a[href^="https://www.openstreetmap.org/directions"]')
         expect(osm_links).to_have_count(len(navigation['osm']['legs']))
         assert [osm_links.nth(i).get_attribute('href') for i in range(osm_links.count())] == [leg['url'] for leg in navigation['osm']['legs']]
         qr_svg = page.locator('svg[role=img]').first
@@ -218,7 +214,7 @@ try:
         decoded, corners, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(qr_path)))
         assert corners is not None and decoded == navigation['google_mobile']['legs'][0]['url'], decoded
         handoff_path = ARTIFACTS / 'navigation-handoff.png'
-        page.get_by_role('heading', name='Navigate with your maps app', exact=True).locator('..').screenshot(path=str(handoff_path))
+        page.get_by_role('heading', name='Navigate', exact=True).locator('..').screenshot(path=str(handoff_path))
         screenshots.append(str(handoff_path))
         intercepted = []
         page.route('https://www.google.com/**', lambda route: (intercepted.append(route.request.url), route.fulfill(status=200, content_type='text/plain', body='intercepted: not sent to Google')))
@@ -227,10 +223,10 @@ try:
         assert intercepted == [navigation['google']['legs'][0]['url']] and page.url == intercepted[0]
         page.unroute('https://www.google.com/**')
         page.goto(f'http://127.0.0.1:{port}')
-        expect(page.get_by_text('Current for this revision', exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='Itinerary', exact=True)).to_be_visible()
         evidence['handoff'] = {'navigation': navigation, 'qr_decoded': decoded, 'clicked': intercepted}
         page.set_viewport_size({'width':390,'height':844})
-        frame.get_by_role('button',name='Fit all stops',exact=True).click()
+        frame.get_by_role('button',name='Fit',exact=True).click()
         map_fits()
         shot('route-mobile-solved.png')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'mobile map horizontal overflow'
@@ -238,24 +234,24 @@ try:
         # Image failure is intentionally injected, never substituted with fake tiles.
         page.route('https://*.tile.openstreetmap.org/**', lambda route: route.abort())
         frame.get_by_role('button',name='Zoom in',exact=True).click()
-        expect(frame.locator('#tiles')).to_contain_text('Street tiles unavailable',timeout=15000)
+        expect(frame.locator('#tiles')).to_contain_text('Map tiles unavailable',timeout=15000)
         expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
-        frame.get_by_role('button',name='Fit all stops',exact=True).click()
+        frame.get_by_role('button',name='Fit',exact=True).click()
         map_fits()
-        expect(frame.locator('#tiles')).to_contain_text('Street tiles unavailable')
+        expect(frame.locator('#tiles')).to_contain_text('Map tiles unavailable')
         expect(page.get_by_role('heading',name='Itinerary',exact=True)).to_be_visible()
         assert current()['revision'] == result['revision'], 'map interactions must not edit the route'
         shot('route-tile-failure.png')
         page.unroute('https://*.tile.openstreetmap.org/**')
 
-        page.get_by_text('Constraints · 0 order locks · next stop fixed',exact=True).click()
-        expect(page.get_by_label('Before stop',exact=True)).to_be_visible()
+        page.get_by_text('Options',exact=True).click()
+        expect(page.get_by_label('First',exact=True)).to_be_visible()
         shot('route-constraints.png')
-        page.get_by_text('Constraints · 0 order locks · next stop fixed',exact=True).click()
-        repaired = named_place('Teatro alla Scala', 'Add named stop', lambda c: c['label'].startswith('Teatro alla Scala'), 'the opera house')
+        page.get_by_text('Options',exact=True).click()
+        repaired = named_place('Teatro alla Scala', 'Add stop', lambda c: c['label'].startswith('Teatro alla Scala'), 'the opera house')
         assert repaired['state']['solution'] is None
         assert len(repaired['state']['stops']) == 3
-        page.get_by_role('button',name='Solve road route',exact=True).click()
+        page.get_by_role('button',name='Solve route',exact=True).click()
         repaired = confirm()
         assert len(repaired['state']['solution']['remaining_order']) == 3
         assert repaired['state']['solution']['remaining_order'][0] == second
@@ -263,7 +259,7 @@ try:
         (ARTIFACTS/'geocoding-evidence.json').write_text(json.dumps({'searches':searches,'chosen':chosen_places,'repaired':repaired},indent=2,ensure_ascii=False))
         repair = repaired['state']['solution']['repair']
         assert repair and [a['title'] for a in repair['added']] and 'Teatro alla Scala' in repair['added'][0]['title'], repair
-        expect(page.get_by_text('What changed since the last route', exact=True)).to_be_visible()
+        expect(page.get_by_text('Changes', exact=True)).to_be_visible()
         expect(page.get_by_text(repair['summary'], exact=True)).to_be_visible()
         evidence['repair'] = repair
         expect(frame.locator('.leaflet-overlay-pane path')).to_have_count(1)
@@ -289,7 +285,7 @@ try:
         assert visited['visited'] == [second]
         assert 'Castello Sforzesco' in visited['origin']['title']
         assert 'Milano Centrale' in visited['return_origin']['title']
-        page.get_by_text('Visited history · 1',exact=True).click()
+        page.get_by_text('Visited · 1',exact=True).click()
         shot('route-visited.png')
         page.set_viewport_size({'width':390,'height':844})
         shot('route-mobile.png')
@@ -326,7 +322,7 @@ try:
         expect(page.get_by_text(via_roma['note'], exact=True)).to_be_visible()
         expect(page.get_by_text('company · Milano · ', exact=False).first).to_be_visible()
         if any(c['far'] for c in via_roma['candidates']):
-            expect(page.get_by_text('⚠ far from your other stops', exact=False).first).to_be_visible()
+            expect(page.get_by_text(' · far away', exact=False).first).to_be_visible()
         shot_first = ARTIFACTS / 'card-plan-needs-choice.png'
         page.screenshot(path=str(shot_first), full_page=True)
         screenshots.append(str(shot_first))
@@ -345,8 +341,7 @@ try:
             'Via Roma': (lambda c: c['kind'] == 'street' and not c['far'] and c['locality'] != 'Legnano' and c['distance_from_start_m'] < 10000, 'the nearest Via Roma (no far one)'),
         }
         page.goto(f'http://127.0.0.1:{port}/?card=1')
-        expect(page.get_by_role('heading', name='Planned places · nothing added yet', exact=True)).to_be_visible()
-        expect(page.get_by_text('Read-only current route', exact=False)).to_be_visible()
+        expect(page.get_by_role('heading', name='Places to add', exact=True)).to_be_visible()
         decisions = []
         for item in plan['items']:
             if item['role'] != 'stop':
@@ -374,14 +369,14 @@ try:
         assert current()['revision'] == 0, 'choosing must not write'
         using = [i for i in plan['items'] if i['status'] in ('supplied','preselected','needs_choice')]
         assert len(using) == len(plan['items']), 'every place resolved deliberately'
-        page.get_by_role('button', name=f"Add {len(using)} place{'s' if len(using) != 1 else ''} in one change", exact=True).click()
+        page.get_by_role('button', name=f"Add {len(using)} place{'s' if len(using) != 1 else ''}", exact=True).click()
         assert current()['revision'] == 0
         applied = confirm()
         assert applied['revision'] == 1 and len(applied['state']['stops']) == len(using) - 1
         assert applied['state']['origin']['title'] == pin['title']
-        expect(page.get_by_role('heading', name='Planned places · nothing added yet', exact=True)).to_have_count(0)
+        expect(page.get_by_role('heading', name='Places to add', exact=True)).to_have_count(0)
         page.goto(f'http://127.0.0.1:{port}')
-        page.get_by_role('button',name='Solve road route',exact=True).click()
+        page.get_by_role('button',name='Solve route',exact=True).click()
         batch_solved = confirm()
         comparison = batch_solved['state']['solution']['comparison']
         solution = batch_solved['state']['solution']
@@ -394,7 +389,7 @@ try:
         evidence['batch'] = {'first_plan': first_plan, 'plan': plan, 'decisions': decisions, 'applied_revision': applied['revision'], 'comparison': comparison,
                              'navigation': batch_solved['navigation']}
         shot('batch-solved.png')
-        page.get_by_role('heading', name='Navigate with your maps app', exact=True).locator('..').screenshot(path=str(ARTIFACTS / 'batch-handoff.png'))
+        page.get_by_role('heading', name='Navigate', exact=True).locator('..').screenshot(path=str(ARTIFACTS / 'batch-handoff.png'))
         screenshots.append(str(ARTIFACTS / 'batch-handoff.png'))
         assert not errors, errors
         passed = True

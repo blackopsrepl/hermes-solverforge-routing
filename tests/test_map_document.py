@@ -30,7 +30,7 @@ def test_guest_security_and_safe_titles():
     assert '</script><script>alert(1)' not in doc
     assert payload(doc)['markers'][0]['title'] == '</script><script>alert(1)</script>'
     assert [p['number'] for p in payload(doc)['markers']] == [0, 1, 2]
-    assert 'Street tiles unavailable or incomplete' in doc and 'Fit all stops' in doc
+    assert 'Map tiles unavailable.' in doc and '>Fit<' in doc
 
 
 def test_stale_geometry_empty_state_and_endpoints():

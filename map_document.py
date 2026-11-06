@@ -14,10 +14,9 @@ def _template() -> str:
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org; connect-src 'none'; base-uri 'none'; form-action 'none'">
 <style>""" + asset("leaflet.css") + "\n" + asset("sf-map.css") + "\n" + asset("guest.css") + """</style></head>
-<body><div id="toolbar"><button id="fit" type="button">Fit all stops</button><span id="summary"></span></div>
+<body><div id="toolbar"><button id="fit" type="button">Fit</button><span id="summary"></span></div>
 <div id="map" aria-label="Interactive street map with road route and numbered stops"></div>
-<p id="tiles" role="status">Loading OpenStreetMap tiles…</p>
-<p id="disclosure">Tiles: © OpenStreetMap contributors · routing: OSRM. Viewing/panning sends the visible map area and your IP to OpenStreetMap tile servers. No live traffic.</p>
+<p id="tiles" role="status"></p>
 <script>""" + asset("leaflet.js") + "\n</script><script>var SF = {};\n" + asset("sf-map.js") + "\n</script><script id=\"route-data\" type=\"application/json\">__ROUTE_DATA__</script><script>" + asset("guest.js") + "\n</script></body></html>"
 
 
@@ -37,7 +36,7 @@ def map_document(state: dict) -> str:
             ids.append("return")
         elif endpoint:
             ids.append(endpoint["id"])
-    markers = [{"number": i, "title": (places[key].get("title") or "Supplied location"), "coordinates": places[key]["coordinates"]} for i, key in enumerate(ids) if places.get(key)]
+    markers = [{"number": i, "title": (places[key].get("title") or ("Start" if key == "origin" else "Home" if key == "return" else "Stop")), "coordinates": places[key]["coordinates"]} for i, key in enumerate(ids) if places.get(key)]
     payload = {"markers": markers, "geometry": (solution.get("geometry") or {}).get("coordinates", []) if solution else [], "solved": bool(solution)}
     # JSON lives in a script element: neutralise HTML raw-text terminators, not
     # just JS quotes. Titles enter Leaflet popups as text nodes in the guest.

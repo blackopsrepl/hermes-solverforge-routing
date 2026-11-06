@@ -39,11 +39,11 @@
     if (fitPending) { fitPending = false; fit(); }
   });
   document.getElementById('fit').addEventListener('click', fit);
-  document.getElementById('summary').textContent = data.markers.length ? (data.solved ? 'Road route · ' : 'Awaiting solve · input order · ') + 'start 0, then numbered visits' : 'Supply an origin and stops to begin.';
+  document.getElementById('summary').textContent = '';
   var failed = false;
   setTimeout(function () {
     if (!failed && !document.querySelector('.leaflet-tile-loaded')) {
-      status.textContent = 'Street tiles unavailable or still loading. Road route and stop numbers remain usable; see itinerary below.';
+      status.textContent = 'Map tiles unavailable.';
       status.className = 'warning';
     }
   }, 15000);
@@ -51,11 +51,11 @@
     if (!(layer instanceof L.TileLayer)) return;
     layer.on('tileerror', function () {
       failed = true;
-      status.textContent = 'Street tiles unavailable or incomplete. Road route and stop numbers remain usable; see itinerary below.';
+      status.textContent = 'Map tiles unavailable.';
       status.className = 'warning';
     });
     layer.on('load', function () {
-      if (!failed) status.textContent = 'OpenStreetMap street tiles loaded · drag to pan, + / − to zoom.';
+      if (!failed) status.textContent = '';
     });
     // Leaflet's stock attribution omits “contributors”. State it explicitly.
     layer.setAttribution && layer.setAttribution('© OpenStreetMap contributors');
