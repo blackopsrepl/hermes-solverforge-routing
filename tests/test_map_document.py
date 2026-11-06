@@ -13,7 +13,7 @@ spec.loader.exec_module(module)
 
 
 def state():
-    return {'revision': 3, 'origin': {'title': '</script><script>alert(1)</script>', 'coordinates': [9, 45]}, 'return_origin': {'title': 'Home', 'coordinates': [9, 45]}, 'stops': [{'id': 's', 'title': 'Stop', 'coordinates': [9.1, 45.1], 'visited': False}], 'endpoint': None, 'round_trip': True, 'solution': {'revision': 3, 'itinerary_ids': ['origin', 's', 'return'], 'legs': [[[9, 45], [9.1, 45.1]], [[9.1, 45.1], [9, 45]]], 'geometry': {'coordinates': [[9, 45], [9.1, 45.1], [9, 45]]}}}
+    return {'revision': 3, 'origin': {'title': '</script><script>alert(1)</script>', 'coordinates': [9, 45]}, 'return_origin': {'title': 'Home', 'coordinates': [9, 45]}, 'stops': [{'id': 's', 'title': 'Stop', 'coordinates': [9.1, 45.1], 'visited': False}], 'endpoint': None, 'round_trip': True, 'solution': {'revision': 3, 'itinerary_ids': ['origin', 's', 'return'], 'legs': [[[9, 45], [9.1, 45.1]], [[9.1, 45.1], [9, 45]]], 'street_runs': [[{'name': 'Via Sarpri', 'distance_m': 1000.0}], [{'name': 'Via Sarpri', 'distance_m': 1000.0}]], 'geometry': {'coordinates': [[9, 45], [9.1, 45.1], [9, 45]]}}}
 
 
 def payload(document):
@@ -32,6 +32,8 @@ def test_guest_security_and_safe_titles():
     assert [p['number'] for p in payload(doc)['markers']] == [0, 1, 2]
     # The engine's hops pass through unchanged: origin→stop, stop→start.
     assert payload(doc)['legs'] == [[[9, 45], [9.1, 45.1]], [[9.1, 45.1], [9, 45]]]
+    # Street runs ride beside the hops when the engine reports them.
+    assert payload(doc)['street_runs'] == [[{'name': 'Via Sarpri', 'distance_m': 1000.0}], [{'name': 'Via Sarpri', 'distance_m': 1000.0}]]
     # Fit lives in the guest JS (a Leaflet control), not in the server document.
     assert 'fit-control' in doc
 
@@ -45,7 +47,7 @@ def test_stale_geometry_empty_state_and_endpoints():
     snapshot['endpoint'] = {'id': 'end', 'coordinates': [10, 46]}
     assert payload(module.map_document(snapshot))['markers'][-1]['coordinates'] == [10, 46]
     snapshot.update(origin=None, return_origin=None, stops=[], endpoint=None)
-    assert payload(module.map_document(snapshot)) == {'markers': [], 'geometry': [], 'legs': [], 'solved': False, 'round_trip': False}
+    assert payload(module.map_document(snapshot)) == {'markers': [], 'geometry': [], 'legs': [], 'street_runs': [], 'solved': False, 'round_trip': False}
     # The core's solved origin-only route has neither itinerary_ids nor geometry.
     snapshot.update(origin={'coordinates': [9, 45]}, solution={'revision': snapshot['revision'], 'geometry': None})
     result = payload(module.map_document(snapshot))

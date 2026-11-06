@@ -106,10 +106,12 @@ function RoutingSurface({ compact = false, scope }) {
   const dot = (text, solid) => jsx('span',{style:{display:'grid',placeItems:'center',width:26,height:26,flexShrink:0,borderRadius:'50%',fontSize:12,fontWeight:700,background:solid?'var(--ui-accent)':'var(--ui-bg-quaternary)',color:solid?'var(--ui-bg-primary, white)':'var(--ui-text-primary)'},children:text})
   // Hop colours must stay in step with assets/map/guest.js: the chip in each
   // itinerary row is the colour of that hop's line on the map.
-  const LEG_COLORS = ['#1d4f9c', '#2e7cc4', '#63a4dd', '#9ec5e8']
+  const LEG_COLORS = ['#1d4f9c', '#047857', '#7c3aed', '#be185d', '#0e7490', '#52525b']
   const HOME_COLOR = '#b45309'
   const chip = (color) => jsx('span',{style:{flexShrink:0,alignSelf:'center',width:18,height:5,borderRadius:3,background:color}, 'aria-hidden':true})
-  const line = (badge, text, extra=null, k, chipColor=null) => jsxs('li',{style:{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0'},children:[badge, chipColor ? chip(chipColor) : null, jsxs('div',{style:{minWidth:0},children:[jsx(NameLines,{text}),extra]})]},k)
+  const runstreet = (runs) => runs && runs.length ? jsx('div',{style:{...muted,fontSize:12,marginTop:2},children:runs.slice(0, 6).map((run) => `${run.name} · ${km(Math.round(run.distance_m))}`).join(' → ') + (runs.length > 6 ? ` → … +${runs.length - 6} more` : '')}) : null
+  const streetRun = ((runs) => runs && runs.length ? jsx('div',{style:{...muted,fontSize:12,marginTop:2},children:runs.slice(0, 6).map((run, i) => runLabel(run)).join(' → ') + (runs.length > 6 ? ` → … +${runs.length - 6}` : '')}) : null)
+  const line = (badge, text, extra=null, k, chipColor=null, streets=null) => jsxs('li',{style:{display:'flex',gap:10,alignItems:'flex-start',padding:'8px 0'},children:[badge, chipColor ? chip(chipColor) : null, jsxs('div',{style:{minWidth:0},children:[jsx(NameLines,{text}),streets,extra]})]},k)
   const summary = fresh
     ? jsxs('div',{children:[
         jsx('div',{style:{fontSize:22,fontWeight:700,letterSpacing:'-.3px'},children:`${minutes(solution.road_duration_seconds)} · ${km(solution.distance_m)}`}),
@@ -127,8 +129,8 @@ function RoutingSurface({ compact = false, scope }) {
         jsx('div',{style:muted,children:'On your phone, share your location in Telegram to start from where you are.'})]})
     : jsx('ol',{style:{listStyle:'none',padding:0,margin:0},children:[
         hasStart ? line(dot('S', fresh), state.origin.title || state.origin.coordinates.join(', '), null, 'start') : null,
-        ...order.map((id,i)=>{ const stop = byId.get(id); return stop ? line(dot(fresh ? i+1 : '•', fresh), stop.title || stop.coordinates.join(', '), state.next_id===id ? jsx('div',{style:{...muted,color:'var(--ui-accent)',fontWeight:600},children:'Next'}) : null, id, fresh ? LEG_COLORS[i % LEG_COLORS.length] : null) : null }),
-        fresh && data.round_trip ? line(dot('S', true), (state.return_origin || state.origin)?.title || 'Start', null, 'home', HOME_COLOR) : null,
+        ...order.map((id,i)=>{ const stop = byId.get(id); const runs = fresh && data.street_runs ? data.street_runs[i] : null; return stop ? line(dot(fresh ? i+1 : '•', fresh), stop.title || stop.coordinates.join(', '), state.next_id===id ? jsx('div',{style:{...muted,color:'var(--ui-accent)',fontWeight:600},children:'Next'}) : null, id, fresh ? LEG_COLORS[i % LEG_COLORS.length] : null, runstreet(runs)) : null }),
+        fresh && data.round_trip ? line(dot('S', true), (state.return_origin || state.origin)?.title || 'Start', null, 'home', HOME_COLOR, runstreet(fresh && data.street_runs ? data.street_runs[data.street_runs.length - 1] : null)) : null,
         fresh && state.endpoint && !state.round_trip ? line(dot('E', true), state.endpoint.title || state.endpoint.coordinates.join(', '), null, 'end', HOME_COLOR) : null]})
   const repair = fresh && solution.repair ? jsxs('div',{style:{...muted,borderTop:'1px solid var(--ui-stroke-tertiary)',paddingTop:10},children:[
       jsx('div',{style:{fontWeight:600,color:'var(--ui-text-primary)'},children:solution.repair.summary}),

@@ -47,7 +47,15 @@ def map_document(state: dict) -> str:
     markers = [{"number": i, "title": _short(places[key].get("title")) or ("Start" if key == "origin" else "Home" if key == "return" else "Stop"), "coordinates": places[key]["coordinates"]} for i, key in enumerate(ids) if places.get(key)]
     geometry = (solution.get("geometry") or {}).get("coordinates", []) if solution else []
     legs = solution.get("legs", []) if solution else []
-    payload = {"markers": markers, "geometry": geometry, "legs": legs, "solved": bool(solution), "round_trip": bool(state.get("round_trip"))}
+    street_runs = solution.get("street_runs", []) if solution else []
+    payload = {
+        "markers": markers,
+        "geometry": geometry,
+        "legs": legs,
+        "street_runs": street_runs,
+        "solved": bool(solution),
+        "round_trip": bool(state.get("round_trip")),
+    }
     # JSON lives in a script element: neutralise HTML raw-text terminators, not
     # just JS quotes. Titles enter Leaflet popups as text nodes in the guest.
     encoded = json.dumps(payload, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")

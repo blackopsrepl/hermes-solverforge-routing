@@ -31,7 +31,7 @@
   // Hop colours match the itinerary rows: the numbered stop tells you where a
   // leg ends, its chip in the list tells you which line is that hop. A round
   // trip's closing leg is dashed amber, like its Home row chip.
-  var LEG_COLORS = ['#1d4f9c', '#2e7cc4', '#63a4dd', '#9ec5e8'];
+  var LEG_COLORS = ['#1d4f9c', '#047857', '#7c3aed', '#be185d', '#0e7490', '#52525b'];
   var HOME_COLOR = '#b45309';
   var legs = data.legs || [];
   legs.forEach(function (leg, n) {

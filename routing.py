@@ -462,6 +462,7 @@ class RouteService:
                     "remaining_order": remaining, "duration_seconds": result["duration_seconds"],
                     "hard_feasible": True, "optimal": result["optimal"], "score": result["score"],
                     "legs": [leg["coordinates"] for leg in legs],
+                    "street_runs": [leg.get("streets", []) for leg in legs],
                     # Each hop starts where the previous one ended: join without repeating the seam.
                     "geometry": {"type": "LineString", "coordinates": legs[0]["coordinates"] + [p for leg in legs[1:] for p in leg["coordinates"][1:]]},
                     "distance_m": sum(leg["distance_m"] for leg in legs),

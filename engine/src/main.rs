@@ -3,7 +3,8 @@ mod domain;
 use serde::{Deserialize, Serialize};
 use solverforge::{prelude::HardSoftScore, SolverEvent, SolverManager};
 use solverforge_maps::{
-    BoundingBox, Coord, NetworkConfig, NetworkRef, RoadNetwork, SnappedCoord, UNREACHABLE,
+    BoundingBox, Coord, NetworkConfig, NetworkRef, RoadNetwork, SnappedCoord, StreetRun,
+    UNREACHABLE,
 };
 use std::{
     collections::HashSet,
@@ -215,6 +216,8 @@ struct Leg {
     coordinates: Vec<[f64; 2]>,
     duration_seconds: i64,
     distance_m: f64,
+    /// Named street runs along the hop, in travel order.
+    streets: Vec<StreetRun>,
 }
 
 #[derive(Serialize)]
@@ -291,6 +294,7 @@ fn legs(roads: &Roads, order: &[usize]) -> Result<Vec<Leg>> {
                 coordinates: route.geometry.iter().map(|c| [c.lng, c.lat]).collect(),
                 duration_seconds: route.duration_seconds,
                 distance_m: route.distance_meters,
+                streets: route.streets,
             })
         })
         .collect()
