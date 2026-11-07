@@ -27,8 +27,13 @@ REPO = "blackopsrepl/hermes-solverforge-routing"
 RELEASE_URL = f"https://github.com/{REPO}/releases/download/engine-v{ENGINE_VERSION}"
 # SHA-256 of each engine-v{ENGINE_VERSION} release asset, copied from the
 # release's SHA256SUMS after verifying each binary's build attestation.
-# Deliberately empty until a real attested engine release exists.
-CHECKSUMS: dict[str, str] = {}
+CHECKSUMS: dict[str, str] = {
+    "x86_64-unknown-linux-musl": "8963c6b98f67f1b59b334a47769e778464e7c01d2d7ebacdb533eb1df930bc38",
+    "aarch64-unknown-linux-musl": "88835a5ae857afe9dd13fd2a0abfb7b00b1ace9e85fd23c066befa05e56803fc",
+    "x86_64-apple-darwin": "7de195d8a44c246fd3b304314144def470fe677db247d2e5fa181259d19b4fff",
+    "aarch64-apple-darwin": "5388415bb18f061ca494d87d63181741a9be462c74f7b37926866bc779b2692e",
+    "x86_64-pc-windows-gnu": "0d81d9ab085666aa49f97d4b30b13cbf14230e32cdbe43fb15f2bd59f26f6160",
+}
 TARGETS = (
     "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
     "x86_64-apple-darwin", "aarch64-apple-darwin", "x86_64-pc-windows-gnu",
