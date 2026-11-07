@@ -12,15 +12,16 @@ Adding a stop does not mean starting over. Tell Hermes what changed and it repai
 
 ## Try it
 
-The plugin is in development. The engine installer is being prepared; there is no published engine download yet. To run the current version from source, you need Hermes Agent 0.22.2 or newer, Rust 1.95+, Python 3.12, uv and Node/npm:
+You need [Hermes Agent](https://github.com/NousResearch/hermes-agent) 0.22.2 or newer.
 
 ```sh
-git clone https://github.com/blackopsrepl/hermes-solverforge-routing.git
-cd hermes-solverforge-routing
-make install-dev
+hermes plugins install blackopsrepl/hermes-solverforge-routing --enable
+hermes solverforge-routing install
 ```
 
-Restart a running Hermes Desktop after installing, then ask:
+The second command downloads the routing engine for your computer and checks it against a fingerprint pinned in the plugin. There is nothing else to install: no Rust, no routing server, no account.
+
+If you already use Hermes, run `hermes chat -q hi` once after installing, then ask. Current Hermes builds a session's tool list from the plugins it saw at the previous launch, so the session right after an install has no routing tools. In the Desktop app, restart it after installing, then ask:
 
 > Start at Milano Centrale. I need to visit Castello Sforzesco, the Darsena and Arco della Pace, then come back to the station. Find a better order.
 
@@ -60,7 +61,7 @@ This is a personal, single-vehicle trip planner, not fleet dispatch. It does not
 
 **A map that stays with the conversation.** [solverforge-ui](https://github.com/SolverForge/solverforge-ui) and Leaflet display the roads in a sandboxed pane. Numbered stops match the itinerary underneath. The map is a viewer; Hermes remains the input.
 
-**A handoff to your navigation app.** Open the itinerary in Google Maps, Apple Maps or OpenStreetMap, or send it to your phone: pick the phone kind (Apple or Google) and scan the single QR on screen — the Apple code opens the Apple Maps app on an iPhone, the Google one suits Android. One code is ever on screen, so the camera has exactly one target. Long trips are split into linked sections rather than silently dropping stops. The navigation app calculates its own route using its own road data.
+**A handoff to your navigation app.** Open the itinerary in Google Maps, Apple Maps or OpenStreetMap, or send it to your phone: pick the phone kind (Apple or Google) and scan the single QR on screen — the Apple code opens the Apple Maps app on an iPhone, the Google one suits Android. One code is ever on screen, so the camera has exactly one target. A trip longer than the app accepts in one link is split into parts rather than silently dropping stops; scan part 1, then press **Next part** for the next code. The navigation app calculates its own route using its own road data.
 
 ![Navigation links and phone handoff for the solved itinerary](docs/screenshots/navigation.png)
 
@@ -91,7 +92,7 @@ You can also supply coordinates or share a location pin through a supported mess
 
 Nominatim and Overpass are public services with no availability guarantee. Do not send confidential addresses to the public geocoder. A Nominatim-compatible HTTPS endpoint can be selected with the `geocoder_url` plugin setting. Searches are paced and cached; there is no autocomplete, IP-based location inference or background searching.
 
-The Rust engine runs once per solve with JSON input and output. Road downloads happen inside [solverforge-maps 2.2.0](https://crates.io/crates/solverforge-maps/2.2.0); stop ordering uses SolverForge 0.24.0. No shell is used to run a solve.
+The Rust engine runs once per solve with JSON input and output. Road downloads happen inside [solverforge-maps 2.3.3](https://crates.io/crates/solverforge-maps/2.3.3); stop ordering uses SolverForge 0.24.0. No shell is used to run a solve.
 
 Everything lives under `<hermes home>/plugin-data/solverforge-routing/`: the route database, road cache and installed engine. Data is isolated by Hermes profile. Removing the plugin keeps that folder so a reinstall can find your trip; delete it to erase the stored data. There are no account credentials or telemetry.
 
@@ -110,11 +111,14 @@ The engine's native constraints are checked again before publication: endpoints,
 
 ## Development
 
+To run from a checkout you need Rust 1.95+, Python 3.12, uv and Node/npm.
+
 ```sh
-make setup         # Check the toolchain
 make engine        # Build the Rust engine
+make install-dev   # Install this checkout's HEAD into Hermes, using the local engine
 make check         # Engine, Python, Desktop render and Hermes package checks
 make images        # Re-render the banner and architecture from editable HTML
+make screenshots   # Re-capture the README screenshots
 ```
 
 Set `CARGO_TARGET_DIR` to keep Rust build artifacts outside the checkout. Offline Python tests use a clearly labelled test-only engine over synthetic roads; solver tests run inside the real Rust engine. The opt-in [browser flow](tests/browser/README.md) runs Chromium against the real REST API and native engine with live road data and tiles. It does not stand in for checking the installed Hermes Desktop.

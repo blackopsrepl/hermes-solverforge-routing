@@ -33,7 +33,7 @@ check: lint test validate
 # The same five Linux-cross-built artifacts as Planner; no macOS runners.
 .PHONY: install-dev uninstall-dev fmt
 install-dev: engine
-	hermes plugins install "file://$(CURDIR)" --force --enable --yes-deps
+	hermes plugins install "file://$(CURDIR)" --force --enable --yes-deps --ref "$$(git -C "$(CURDIR)" rev-parse HEAD)"
 	hermes config set plugins.entries.solverforge-routing.settings.binary "$(ENGINE_BIN)"
 uninstall-dev:
 	hermes plugins remove solverforge-routing
