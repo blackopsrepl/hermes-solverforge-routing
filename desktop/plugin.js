@@ -35,6 +35,7 @@ function QrCode({qr, caption}) {
 }
 function Handoff({nav, showQr, onToggleQr}) {
   const [picked, setPicked] = useState(null)
+  const [part, setPart] = useState(0)
   if (!nav) return null
   const points = nav.points
   const group = (name, legs) => legs.length === 1 ? [jsx(ExternalLink,{url:legs[0].url,text:name},name)] : legs.map((leg,i)=>jsx(ExternalLink,{url:leg.url,text:`${name} ${i+1}/${legs.length}`},`${name}${i}`))
@@ -45,8 +46,17 @@ function Handoff({nav, showQr, onToggleQr}) {
   // chance. Apple defaults (the iPhone case); Google stays as the alternative.
   const appleReady = apple.some(leg => leg && leg.qr)
   const provider = picked ?? (appleReady ? 'apple' : 'google')
-  const qrLegs = provider === 'apple' ? apple : mobile
-  const pill = (key, label) => jsx(Button, {onClick:()=>setPicked(key), size:'sm', variant:provider===key?'secondary':'text', children:label}, `provider-${key}`)
+  // A long route needs several handoff parts; they are scanned one after the
+  // other, so only the current part's code is on screen.
+  const qrLegs = (provider === 'apple' ? apple : mobile).filter(leg => leg && leg.qr)
+  const current = Math.min(part, Math.max(qrLegs.length - 1, 0))
+  const leg = qrLegs[current]
+  const pill = (key, label) => jsx(Button, {onClick:()=>{setPicked(key); setPart(0)}, size:'sm', variant:provider===key?'secondary':'text', children:label}, `provider-${key}`)
+  const caption = qrLegs.length > 1 ? `Part ${current+1} of ${qrLegs.length}: ${legName(leg,points)}` : provider==='apple' ? 'Opens the Apple Maps app' : 'Opens Google Maps'
+  const stepper = qrLegs.length > 1 ? jsxs('div',{style:{...row,alignItems:'center'},children:[
+    jsx(Button,{onClick:()=>setPart(current-1),disabled:current===0,size:'sm',variant:'text',children:'← Previous part'}),
+    jsx(Button,{onClick:()=>setPart(current+1),disabled:current===qrLegs.length-1,size:'sm',variant:'text',children:'Next part →'}),
+  ]}) : null
   return jsxs('div',{style:{display:'flex',flexDirection:'column',gap:8,borderTop:'1px solid var(--ui-stroke-tertiary)',paddingTop:12},children:[
     jsx('h3',{style:{margin:0,fontSize:14},children:'Navigate'}),
     jsxs('div',{style:row,children:[...group('Google Maps',nav.google.legs),...group('Apple Maps',apple)]}),
@@ -58,7 +68,8 @@ function Handoff({nav, showQr, onToggleQr}) {
         appleReady ? pill('apple', 'iPhone → Apple Maps') : null,
         pill('google', 'Android → Google Maps'),
       ]}),
-      jsx('div',{style:{...row,alignItems:'flex-start',gap:16},children:qrLegs.filter(leg => leg && leg.qr).map((leg,i)=>jsx(QrCode,{qr:leg.qr,caption:qrLegs.length>1?`Part ${i+1}/${qrLegs.length}: ${legName(leg,points)}`:provider==='apple'?'Opens the Apple Maps app':'Opens Google Maps'},`qr-${provider}${i}`))}),
+      leg ? jsx(QrCode,{qr:leg.qr,caption},`qr-${provider}${current}`) : null,
+      stepper,
     ]}) : null
   ]})
 }

@@ -230,6 +230,7 @@ try:
         apple_first = navigation['apple']['legs'][0]
         default_url = apple_first['url'] if apple_first.get('qr') else navigation['google_mobile']['legs'][0]['url']
         assert corners is not None and decoded == default_url, decoded
+        expect(page.locator('svg[role=img]')).to_have_count(1)
         # The provider pill swaps what the camera sees, exactly one code on
         # screen either way.
         page.get_by_role('button', name='Android → Google Maps').click()
@@ -240,6 +241,20 @@ try:
         screenshots.append(str(google_qr_path))
         google_decoded, google_corners, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(google_qr_path)))
         assert google_corners is not None and google_decoded == navigation['google_mobile']['legs'][0]['url'], google_decoded
+        expect(page.locator('svg[role=img]')).to_have_count(1)
+        # A route split into parts shows one part's code at a time; the
+        # stepper swaps it for the next part, never adds a second code.
+        mobile_legs = navigation['google_mobile']['legs']
+        if len(mobile_legs) > 1:
+            expect(page.get_by_text(f'Part 1 of {len(mobile_legs)}', exact=False)).to_be_visible()
+            page.get_by_role('button', name='Next part →').click()
+            expect(page.locator('svg[role=img]')).to_have_count(1)
+            part_path = ARTIFACTS / 'navigation-qr-google-part2.png'
+            page.locator('svg[role=img]').first.screenshot(path=str(part_path))
+            screenshots.append(str(part_path))
+            part_decoded, part_corners, _ = cv2.QRCodeDetector().detectAndDecode(cv2.imread(str(part_path)))
+            assert part_corners is not None and part_decoded == mobile_legs[1]['url'], part_decoded
+            evidence['qr_parts'] = {'google_mobile': len(mobile_legs), 'part2_decoded': part_decoded}
         page.get_by_role('button', name='iPhone → Apple Maps').click()
         handoff_path = ARTIFACTS / 'navigation-handoff.png'
         page.get_by_role('heading', name='Navigate', exact=True).locator('..').screenshot(path=str(handoff_path))
