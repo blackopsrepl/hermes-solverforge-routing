@@ -15,13 +15,8 @@ from routing import RouteService  # noqa: E402
 from store import StaleRevision  # noqa: E402
 import planning  # noqa: E402
 
-ENGINE = [sys.executable, str(ROOT / "tests/contract_engine.py")]
-
-
-@pytest.fixture(autouse=True)
-def line_roads(monkeypatch):
-    # Synthetic line roads: driving time = 60 s per 0.01° of longitude.
-    monkeypatch.setenv("CONTRACT_SECONDS_PER_DEGREE", "6000")
+# Synthetic line roads: driving time = 60 s per 0.01° of longitude.
+ENGINE = [sys.executable, str(ROOT / "tests/contract_engine.py"), "6000"]
 
 
 class Geocoder:

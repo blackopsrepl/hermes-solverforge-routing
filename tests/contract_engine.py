@@ -6,12 +6,12 @@ Its roads are straight lines with deterministic made-up costs.
 """
 import itertools
 import json
-import os
 import sys
 
 request = json.load(sys.stdin)
 points = request["points"]
-line = os.environ.get("CONTRACT_SECONDS_PER_DEGREE")
+# Optional argument: seconds of driving per degree of longitude, for places on a line.
+line = sys.argv[1] if len(sys.argv) > 1 else None
 if line:
     # Places on a line: driving time proportional to the longitude gap.
     request["matrix"] = [[round(abs(a[0] - b[0]) * float(line)) for b in points] for a in points]

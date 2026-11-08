@@ -226,15 +226,17 @@ def test_batch_plan_navigation_and_value_over_rest_with_real_engine(tmp_path, mo
     api = load('routing_plan_dashboard_test', ROOT / 'dashboard/plugin_api.py')
     package = api._package()
     monkeypatch.setattr(package, 'data_dir', lambda: tmp_path / 'one')
-    monkeypatch.setattr(api, '_config', lambda key, default=None: str(ENGINE) if key == 'binary' else default)
+    # Synthetic roads (explicit, offline): seconds proportional to longitude gap.
+    line_engine = tmp_path / 'line-engine'
+    line_engine.write_text(f'#!/bin/sh\nexec {sys.executable} {ENGINE} 10000\n')
+    line_engine.chmod(0o755)
+    monkeypatch.setattr(api, '_config', lambda key, default=None: str(line_engine) if key == 'binary' else default)
     import importlib
     geocoding = importlib.import_module('.geocoding', package.__name__)
     answers = {'Duomo': [{'label':'Duomo di Milano','coordinates':[9.1919,45.4642]}],
                'San Marco': [{'label':'San Marco, Milano','coordinates':[9.188,45.478]}, {'label':'San Marco, Venezia','coordinates':[12.34,45.43]}],
                'Castello': [{'label':'Castello Sforzesco','coordinates':[9.1795,45.4705]}]}
     monkeypatch.setattr(geocoding.NominatimGeocoder, 'search', lambda self, q, r, viewbox=None: answers[q])
-    # Synthetic roads (explicit, offline): seconds proportional to longitude gap.
-    monkeypatch.setenv('CONTRACT_SECONDS_PER_DEGREE', '10000')
     app = FastAPI(); app.include_router(api.router)
     client = TestClient(app)
     pin = {'title':'Shared location (shared 09:12)','coordinates':[9.17,45.47]}
