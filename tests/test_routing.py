@@ -294,6 +294,21 @@ class OutputValidationTests(unittest.TestCase):
             with self.assertRaises(EngineError):
                 engine.solve(self.request)
 
+    def test_engine_process_gets_no_secrets_from_the_environment(self):
+        import os
+        from unittest import mock
+        seen = Path(tempfile.mkdtemp()) / "env.json"
+        program = f"import json,os; json.dump(sorted(os.environ), open({str(seen)!r}, 'w')); raise SystemExit(2)"
+        secrets = {"OPENAI_API_KEY": "sk-not-for-the-engine", "GITHUB_TOKEN": "ghp-not-for-the-engine",
+                   "HTTPS_PROXY": "http://proxy.example:3128"}
+        with mock.patch.dict(os.environ, secrets):
+            with self.assertRaises(EngineError):
+                SubprocessEngine([sys.executable, "-c", program]).solve(self.request)
+        keys = set(json.loads(seen.read_text()))
+        self.assertNotIn("OPENAI_API_KEY", keys)
+        self.assertNotIn("GITHUB_TOKEN", keys)
+        self.assertIn("HTTPS_PROXY", keys)  # road downloads still honour the user's proxy
+
 
 def test_coordinate_validation():
     for value in ([float("inf"), 45], [9, None], [9, 91]):

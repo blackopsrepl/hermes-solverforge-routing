@@ -13,6 +13,7 @@ Toggling round trips does not reanchor. A configured endpoint is not a visit.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import tempfile
@@ -42,6 +43,21 @@ def location(value: dict) -> dict:
     return {"coordinates": coordinate(value.get("coordinates")), "title": title}
 
 
+# The engine downloads OpenStreetMap roads, so it keeps what networking needs (proxy settings,
+# CA certificates) and what a process needs to start. API keys and tokens in Hermes'
+# environment are not passed on.
+ENGINE_ENV_KEYS = (
+    "PATH", "SYSTEMROOT", "LANG", "TMPDIR", "TMP", "TEMP",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR",
+)
+
+
+def engine_env() -> dict[str, str]:
+    return {key: os.environ[key] for key in ENGINE_ENV_KEYS if key in os.environ}
+
+
 class SubprocessEngine:
     """One bounded JSON request/response, no shell or private runtime imports."""
     def __init__(self, command: Sequence[str] | str, max_output_bytes: int = 1_000_000):
@@ -57,7 +73,8 @@ class SubprocessEngine:
             source.write(json.dumps(request, allow_nan=False).encode())
             source.seek(0)
             try:
-                process = subprocess.Popen(self.command, stdin=source, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                process = subprocess.Popen(self.command, stdin=source, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE, env=engine_env())
             except OSError as exc:
                 raise EngineError(f"cannot start route engine: {exc}") from exc
             buffers = [bytearray(), bytearray()]

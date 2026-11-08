@@ -101,8 +101,10 @@ class Engine:
         binary = self.binary()
         if binary is None:
             return None
+        from .routing import engine_env
         try:
-            out = subprocess.run([str(binary), "--version"], capture_output=True, text=True, timeout=10)
+            out = subprocess.run([str(binary), "--version"], capture_output=True, text=True, timeout=10,
+                                 env=engine_env())
             if out.returncode:
                 return None
             envelope = json.loads(out.stdout)
