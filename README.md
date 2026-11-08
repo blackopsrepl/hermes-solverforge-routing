@@ -12,7 +12,7 @@ Adding a stop does not mean starting over. Tell Hermes what changed and it repai
 
 ## Try it
 
-You need [Hermes Agent](https://github.com/NousResearch/hermes-agent) 0.22.2 or newer.
+You need [Hermes Agent](https://github.com/NousResearch/hermes-agent) 0.22.2 or newer, on Linux or macOS.
 
 ```sh
 hermes plugins install blackopsrepl/hermes-solverforge-routing --enable
@@ -94,7 +94,7 @@ Nominatim and Overpass are public services with no availability guarantee. Do no
 
 The Rust engine runs once per solve with JSON input and output. Road downloads happen inside [solverforge-maps 2.3.3](https://crates.io/crates/solverforge-maps/2.3.3); stop ordering uses SolverForge 0.24.0. No shell is used to run a solve.
 
-Everything lives under `<hermes home>/plugin-data/solverforge-routing/`: the route database, road cache and installed engine. Data is isolated by Hermes profile. Removing the plugin keeps that folder so a reinstall can find your trip; delete it to erase the stored data. There are no account credentials or telemetry.
+The route database, road cache and installed engine live under `<hermes home>/plugin-data/solverforge-routing/`, isolated by Hermes profile. One more file sits outside it: `~/.cache/hermes-solverforge-routing/geocoder-pace`, a lock holding only a timestamp, shared by all profiles so searches stay within Nominatim's one-request-per-second limit. Removing the plugin keeps that folder so a reinstall can find your trip; delete it to erase the stored data. There are no account credentials or telemetry.
 
 Road and tile data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright). Search uses [Nominatim](https://nominatim.org/); road downloads use [Overpass](https://overpass-api.de/).
 
